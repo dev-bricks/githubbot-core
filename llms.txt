@@ -13,6 +13,8 @@ Languages: en, de
 - Python API: `githubbot_core.triage`, `githubbot_core.actions`, `githubbot_core.health`,
   `githubbot_core.traffic`, `githubbot_core.stars`, `githubbot_core.pr_review`,
   `githubbot_core.plugins`, `githubbot_core.review_gate`, `githubbot_core.credentials`.
+- System agent template: `githubbot-core --json system-agent` (schema
+  `githubbot-core.system-agent/v1`, version + sha256, agent-studio blueprint fields).
 - Plugin SPI v1: entry-point group `githubbot_core.plugins`, factory returning an object with
   `name`, `spi_version`, `describe()`, optional `plan(ctx)` and `pr_policy_checks(pr, files, diff)`.
 

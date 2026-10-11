@@ -44,6 +44,10 @@ def test_installed_package_cli_without_private_extension(tmp_path: Path) -> None
     envelope = json.loads(info.stdout)
     assert envelope["ok"] is True and envelope["data"]["plugins"] == []
 
+    agent = _run([str(cli), "--json", "system-agent"], cwd=work)  # template ships as package data
+    assert agent.returncode == 0, agent.stderr
+    assert json.loads(agent.stdout)["data"]["blueprint"]["name"] == "githubbot"
+
     origin = _run([str(python), "-c", "import githubbot_core, sys; print(githubbot_core.__file__)"], cwd=work)
     assert "site-packages" in origin.stdout, origin.stdout  # not the source tree
 

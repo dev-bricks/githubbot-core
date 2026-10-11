@@ -15,6 +15,7 @@ Exit codes: 0 ok, 1 runtime error (for example GitHub not reachable),
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -111,6 +112,18 @@ def cmd_plugins(args, config, transport) -> int:
     text = "\n".join(f"{p['name']}: {'available' if p['available'] else p['error']}" for p in listing) \
         or "no plugins installed"
     _emit(args, "plugins", True, "read", listing, [], text)
+    return EXIT_OK
+
+
+def cmd_system_agent(args, config, transport) -> int:
+    template = json.loads(resources.files("githubbot_core").joinpath("system_agent.json").read_text(encoding="utf-8"))
+    canonical = json.dumps(template, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    data = {"schema": template["_meta"]["schema"], "id": template["id"], "version": __version__,
+            "sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+            "capability": {"package": "githubbot-core", "version": __version__, "spi_version": plugins.SPI_VERSION},
+            "blueprint": template["blueprint"], "permissions": config.get("permissions", {})}
+    text = f"system agent {data['id']} {data['version']} sha256 {data['sha256']}"
+    _emit(args, "system-agent", True, "read", data, [], text)
     return EXIT_OK
 
 
@@ -240,6 +253,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("info", help="version, contract and plugin overview").set_defaults(func=cmd_info)
     sub.add_parser("doctor", help="check gh CLI, credentials and permissions").set_defaults(func=cmd_doctor)
     sub.add_parser("plugins", help="list installed plugins").set_defaults(func=cmd_plugins)
+    sub.add_parser("system-agent", help="versioned system agent template of this package").set_defaults(
+        func=cmd_system_agent)
 
     p = sub.add_parser("classify", help="classify issues from a JSON file (offline)")
     p.add_argument("--input", required=True)
