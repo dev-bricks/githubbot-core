@@ -1,7 +1,7 @@
 {
   "_meta": {
     "schema": "githubbot-core.system-agent/v1",
-    "description": "Neutral system agent template shipped with this package. It exists only where githubbot-core is installed; read it with `githubbot-core --json system-agent`. `blueprint` uses the field names of the ellmos agent-studio blueprint payload. Consumers may change persona, skills, governance and model; a newer template version must not silently overwrite an existing agent configuration."
+    "description": "Neutral system agent template shipped with this package. It exists only where githubbot-core is installed; read it with `githubbot-core --json system-agent`. `blueprint` uses the field names of the agent-studio blueprint payload. Consumers may change persona, skills, governance and model; a newer template version must not silently overwrite an existing agent configuration."
   },
   "id": "githubbot",
   "blueprint": {

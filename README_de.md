@@ -7,7 +7,7 @@ Duplikaterkennung, Pull-Request-Zusammenfassungen, lesende Berichte zu Gesundhei
 Sternen, ein Vorschau-/Ausführungsvertrag für jede Schreibaktion, eine Plugin-Schnittstelle (SPI)
 und signierte Exact-SHA-Review-Belege. Reine Python-Standardbibliothek, keine Laufzeitabhängigkeiten.
 
-> Status: Alpha (0.1.0). Verbindlich sind CLI, JSON-Ergebnishülle und SPI-Version 1; alles andere
+> Status: Alpha (0.2.0). Verbindlich sind CLI, JSON-Ergebnishülle und SPI-Version 1; alles andere
 > kann sich noch ändern.
 
 ## Funktionen
@@ -92,7 +92,7 @@ Die Python-API ist das Paket selbst: `githubbot_core.triage.IssueTriage`,
 `githubbot-core --json system-agent` gibt die neutrale, mit dem Paket ausgelieferte Agentenvorlage aus
 (Schema `githubbot-core.system-agent/v1`): `version` (Paketversion), `sha256` der kanonischen Vorlage,
 `capability`, die wirksamen `permissions` und ein `blueprint` mit den Feldnamen des
-ellmos-Agent-Studio-Blueprint-Payloads (Persona, Rolle, Contractus, Governance, Skills). Die Vorlage
+Agent-Studio-Blueprint-Payloads (Persona, Rolle, Contractus, Governance, Skills). Die Vorlage
 existiert nur dort, wo das Paket installiert ist. Konsumenten binden einen Agenten an `version` +
 `sha256` und überschreiben bei einer neueren Vorlage keine bestehende Agentenkonfiguration.
 

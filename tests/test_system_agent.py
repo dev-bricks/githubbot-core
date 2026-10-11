@@ -8,7 +8,7 @@ from importlib import resources
 
 from githubbot_core import __version__, cli
 
-# Rules of the consuming agent-studio save/materialize path (ellmos BACH blueprint service).
+# Rules of the consuming agent-studio save/materialize path (blueprint service).
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 KINDS = {"agent", "role", "skill", "workflow", "service", "contractus"}
 ANIMUS = {"api", "cli", "subscription", "local"}
