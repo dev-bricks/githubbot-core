@@ -115,11 +115,20 @@ def cmd_plugins(args, config, transport) -> int:
     return EXIT_OK
 
 
+def template_sha256(schema: str, template_id: str, blueprint: dict) -> str:
+    """sha256 over canonical JSON of exactly {schema, id, blueprint}: sort_keys, separators (",", ":"),
+    ensure_ascii=False, UTF-8. Excludes version, capability, permissions and _meta, so a consumer can
+    recompute it from the printed `data` alone."""
+    material = {"schema": schema, "id": template_id, "blueprint": blueprint}
+    canonical = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def cmd_system_agent(args, config, transport) -> int:
     template = json.loads(resources.files("githubbot_core").joinpath("system_agent.json").read_text(encoding="utf-8"))
-    canonical = json.dumps(template, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    data = {"schema": template["_meta"]["schema"], "id": template["id"], "version": __version__,
-            "sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+    schema = template["_meta"]["schema"]
+    data = {"schema": schema, "id": template["id"], "version": __version__,
+            "sha256": template_sha256(schema, template["id"], template["blueprint"]),
             "capability": {"package": "githubbot-core", "version": __version__, "spi_version": plugins.SPI_VERSION},
             "blueprint": template["blueprint"], "permissions": config.get("permissions", {})}
     text = f"system agent {data['id']} {data['version']} sha256 {data['sha256']}"

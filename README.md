@@ -7,7 +7,7 @@ pull-request summaries, read-only health/traffic/star reports, a preview/apply c
 write, a plugin SPI and signed exact-SHA review receipts. Pure Python standard library, no runtime
 dependencies.
 
-> Status: alpha (0.2.0). The CLI, the JSON result envelope and SPI version 1 are the contract;
+> Status: alpha (0.2.1). The CLI, the JSON result envelope and SPI version 1 are the contract;
 > everything else may still change.
 
 ## Features
@@ -89,8 +89,8 @@ The Python API is the package itself: `githubbot_core.triage.IssueTriage`,
 ### System agent template
 
 `githubbot-core --json system-agent` prints the neutral agent template shipped with the package
-(schema `githubbot-core.system-agent/v1`): `version` (package version), `sha256` of the canonical
-template, `capability`, the effective `permissions` and a `blueprint` with the field names of the
+(schema `githubbot-core.system-agent/v1`): `version` (package version), `sha256` over the canonical JSON of
+`{schema, id, blueprint}` (sorted keys, compact separators, UTF-8; verifiable from the printed output), `capability`, the effective `permissions` and a `blueprint` with the field names of the
 agent-studio blueprint payload (persona, role, contractus, governance, skills). The template
 exists only where the package is installed. Consumers bind an agent to `version` + `sha256` and must
 not overwrite an existing agent configuration when a newer template appears.
