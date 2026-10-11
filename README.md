@@ -1,5 +1,7 @@
 # githubbot-core
 
+<p align="center"><img src="assets/banner.png" width="100%" alt="githubbot-core banner"></p>
+
 **English** | [Deutsch](README_de.md)
 
 Neutral, installable core for GitHub repository maintenance: issue triage, duplicate detection,
@@ -165,6 +167,7 @@ trust boundaries and rollback: [docs/REVIEW_GATE.md](docs/REVIEW_GATE.md).
 pip install -e ".[dev]"
 python -m pytest            # unit and contract tests
 ruff check .
+ruff format --check .
 GITHUBBOT_CORE_CONSUMER_TEST=1 python -m pytest tests/test_consumer_install.py   # fresh-venv install test
 ```
 

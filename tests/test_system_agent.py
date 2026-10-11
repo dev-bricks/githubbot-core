@@ -40,7 +40,7 @@ def test_template_identity_is_version_plus_canonical_hash(capsys):
     assert data["sha256"] == _recompute(
         {"schema": template["_meta"]["schema"], "id": template["id"], "blueprint": template["blueprint"]}
     )
-    assert data["sha256"].startswith("2e72c000")  # pinned: v0.2.0 blueprint content, BACH contract
+    assert data["sha256"].startswith("2e72c000")  # pinned: v0.2.0 blueprint content, consumer contract
     assert data["capability"] == {"package": "githubbot-core", "version": __version__, "spi_version": 1}
 
 

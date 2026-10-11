@@ -1,5 +1,7 @@
 # githubbot-core
 
+<p align="center"><img src="assets/banner.png" width="100%" alt="githubbot-core Banner"></p>
+
 [English](README.md) | **Deutsch**
 
 Neutraler, installierbarer Kern für die Pflege von GitHub-Repositories: Issue-Triage,
@@ -167,6 +169,7 @@ Details, Vertrauensgrenzen und Rollback: [docs/REVIEW_GATE.md](docs/REVIEW_GATE.
 pip install -e ".[dev]"
 python -m pytest            # Unit- und Vertragstests
 ruff check .
+ruff format --check .
 GITHUBBOT_CORE_CONSUMER_TEST=1 python -m pytest tests/test_consumer_install.py   # Installationstest im frischen venv
 ```
 
