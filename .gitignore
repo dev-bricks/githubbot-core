@@ -1,0 +1,66 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ---- Virtual environments ----
+venv/
+.venv/
+env/
+.env/
+
+# ---- Internal working notes (never tracked) ----
+AUFGABEN.txt
+AUFGABEN.md
+TODO.md
+TODO.txt
+DONE.md
+DONE.txt
+LOCK.txt
+LOCK.*.txt
+LOCK-CACHE.md
+DECISIONS.md
+BEFUNDE.md
+*MARKETING-LOG.txt
+*STATUS-LOG.txt
+tmpclaude-*
+
+# ---- Secrets and local state ----
+.env
+.env.*
+credentials.json
+client_secret*.json
+token.json
+*.pem
+*.key
+*.db
+*.sqlite
+*.sqlite3
+receipts*.jsonl
+config.local.json
+
+# ---- Build artefacts, logs ----
+releases/
+*.log
+logs/
+*.tmp
+*.bak
+
+# ---- IDE / OS ----
+.claude/
+.vscode/
+.idea/
+desktop.ini
+Thumbs.db
+.DS_Store
