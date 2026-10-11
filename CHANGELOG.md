@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 
 ## [Unreleased]
 
+### Hinzugefügt / Added
+
+- Befehl `system-agent`: versionierte, gehashte Systemagent-Vorlage (`githubbot-core.system-agent/v1`)
+  mit Agent-Studio-Blueprint-Feldern, nur bei installiertem Paket vorhanden /
+  `system-agent` command: versioned, hashed system agent template with agent-studio blueprint fields,
+  present only where the package is installed.
+
 ## [0.1.0] - 2026-10-11
 
 ### Hinzugefügt / Added

@@ -62,8 +62,9 @@ githubbot-core duplicates --input issues.json --threshold 0.8
 # Pull-request summary (+ checks from installed plugins)
 githubbot-core review-pr --repo owner/repo --pr 12
 
-# Plugins
+# Plugins and system agent template
 githubbot-core plugins
+githubbot-core --json system-agent
 githubbot-core run <plugin> [--plugin-arg ...] [--apply]
 ```
 
@@ -84,6 +85,15 @@ not reachable or a write failed), `2` configuration or usage error, `3` plugin n
 The Python API is the package itself: `githubbot_core.triage.IssueTriage`,
 `githubbot_core.actions.preview/apply`, `githubbot_core.health.RepoHealthCollector`,
 `githubbot_core.plugins`, `githubbot_core.review_gate`, `githubbot_core.credentials`.
+
+### System agent template
+
+`githubbot-core --json system-agent` prints the neutral agent template shipped with the package
+(schema `githubbot-core.system-agent/v1`): `version` (package version), `sha256` of the canonical
+template, `capability`, the effective `permissions` and a `blueprint` with the field names of the
+ellmos agent-studio blueprint payload (persona, role, contractus, governance, skills). The template
+exists only where the package is installed. Consumers bind an agent to `version` + `sha256` and must
+not overwrite an existing agent configuration when a newer template appears.
 
 ## Configuration and permissions
 

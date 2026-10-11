@@ -62,8 +62,9 @@ githubbot-core duplicates --input issues.json --threshold 0.8
 # Pull-Request-Zusammenfassung (+ Prüfungen installierter Plugins)
 githubbot-core review-pr --repo owner/repo --pr 12
 
-# Plugins
+# Plugins und Systemagent-Vorlage
 githubbot-core plugins
+githubbot-core --json system-agent
 githubbot-core run <plugin> [--plugin-arg ...] [--apply]
 ```
 
@@ -85,6 +86,15 @@ nicht erreichbar oder Schreibaktion fehlgeschlagen), `2` Konfigurations- oder Au
 Die Python-API ist das Paket selbst: `githubbot_core.triage.IssueTriage`,
 `githubbot_core.actions.preview/apply`, `githubbot_core.health.RepoHealthCollector`,
 `githubbot_core.plugins`, `githubbot_core.review_gate`, `githubbot_core.credentials`.
+
+### Systemagent-Vorlage
+
+`githubbot-core --json system-agent` gibt die neutrale, mit dem Paket ausgelieferte Agentenvorlage aus
+(Schema `githubbot-core.system-agent/v1`): `version` (Paketversion), `sha256` der kanonischen Vorlage,
+`capability`, die wirksamen `permissions` und ein `blueprint` mit den Feldnamen des
+ellmos-Agent-Studio-Blueprint-Payloads (Persona, Rolle, Contractus, Governance, Skills). Die Vorlage
+existiert nur dort, wo das Paket installiert ist. Konsumenten binden einen Agenten an `version` +
+`sha256` und überschreiben bei einer neueren Vorlage keine bestehende Agentenkonfiguration.
 
 ## Konfiguration und Rechte
 
