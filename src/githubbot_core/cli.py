@@ -41,8 +41,7 @@ EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, EXIT_PLUGIN = 0, 1, 2, 3
 
 def _emit(args, command: str, ok: bool, mode: str, data: Any, errors: list[str], text: str = "") -> None:
     if args.json:
-        envelope = {"schema": RESULT_SCHEMA, "command": command, "ok": ok, "mode": mode,
-                    "data": data, "errors": errors}
+        envelope = {"schema": RESULT_SCHEMA, "command": command, "ok": ok, "mode": mode, "data": data, "errors": errors}
         print(json.dumps(envelope, ensure_ascii=False, indent=2, default=str))
         return
     if text:
@@ -65,9 +64,13 @@ def _read_issues(path: Path) -> list[GitHubIssue]:
 def _plan_output(args, command: str, plan: list, config: dict, transport, extra: Optional[dict] = None) -> int:
     """Shared preview/apply step for every command that produces actions."""
     if args.apply:
-        result = actions.apply(plan, transport, config,
-                               receipt_store=Path(args.receipts) if args.receipts else None,
-                               expected_plan_sha256=args.expect_plan)
+        result = actions.apply(
+            plan,
+            transport,
+            config,
+            receipt_store=Path(args.receipts) if args.receipts else None,
+            expected_plan_sha256=args.expect_plan,
+        )
         failed = [r for r in result["receipts"] if r["status"] == "failed"]
         errors = ([result["error"]] if result.get("error") else []) + [f"{r['id'][:12]}: {r['detail']}" for r in failed]
         data = {**(extra or {}), **result}
@@ -76,17 +79,25 @@ def _plan_output(args, command: str, plan: list, config: dict, transport, extra:
         return EXIT_RUNTIME if errors else EXIT_OK
     result = actions.preview(plan, config)
     data = {**(extra or {}), **result}
-    lines = [f"preview: {'ok    ' if a['permitted'] else 'DENIED'} {a['kind']:<18} {a['reason']}"
-             + (f"  ({a['denied_reason']})" if a["denied_reason"] else "") for a in result["actions"]]
+    lines = [
+        f"preview: {'ok    ' if a['permitted'] else 'DENIED'} {a['kind']:<18} {a['reason']}"
+        + (f"  ({a['denied_reason']})" if a["denied_reason"] else "")
+        for a in result["actions"]
+    ]
     lines.append(f"plan_sha256 {result['plan_sha256']} -- nothing written; rerun with --apply to execute")
     _emit(args, command, True, "preview", data, [], "\n".join(lines))
     return EXIT_OK
 
 
 def cmd_info(args, config, transport) -> int:
-    data = {"package": "githubbot-core", "version": __version__, "result_schema": RESULT_SCHEMA,
-            "spi_version": plugins.SPI_VERSION, "plugin_group": plugins.ENTRY_POINT_GROUP,
-            "plugins": plugins.list_plugins()}
+    data = {
+        "package": "githubbot-core",
+        "version": __version__,
+        "result_schema": RESULT_SCHEMA,
+        "spi_version": plugins.SPI_VERSION,
+        "plugin_group": plugins.ENTRY_POINT_GROUP,
+        "plugins": plugins.list_plugins(),
+    }
     text = f"githubbot-core {__version__} (SPI v{plugins.SPI_VERSION}, {len(data['plugins'])} plugin(s))"
     _emit(args, "info", True, "read", data, [], text)
     return EXIT_OK
@@ -98,19 +109,27 @@ def cmd_doctor(args, config, transport) -> int:
         credential = {"available": True, "provider": provider}
     except CredentialUnavailable as exc:
         credential = {"available": False, "detail": str(exc)}
-    data = {"gh_cli": shutil.which("gh") is not None, "credential": credential,
-            "permissions": config.get("permissions", {}), "plugins": plugins.list_plugins()}
-    text = (f"gh CLI: {'found' if data['gh_cli'] else 'missing'}\n"
-            f"credential: {credential.get('provider') or 'not available'}\n"
-            f"enabled actions: {', '.join(data['permissions'].get('enabled', [])) or 'none'}")
+    data = {
+        "gh_cli": shutil.which("gh") is not None,
+        "credential": credential,
+        "permissions": config.get("permissions", {}),
+        "plugins": plugins.list_plugins(),
+    }
+    text = (
+        f"gh CLI: {'found' if data['gh_cli'] else 'missing'}\n"
+        f"credential: {credential.get('provider') or 'not available'}\n"
+        f"enabled actions: {', '.join(data['permissions'].get('enabled', [])) or 'none'}"
+    )
     _emit(args, "doctor", True, "read", data, [], text)
     return EXIT_OK
 
 
 def cmd_plugins(args, config, transport) -> int:
     listing = plugins.list_plugins()
-    text = "\n".join(f"{p['name']}: {'available' if p['available'] else p['error']}" for p in listing) \
+    text = (
+        "\n".join(f"{p['name']}: {'available' if p['available'] else p['error']}" for p in listing)
         or "no plugins installed"
+    )
     _emit(args, "plugins", True, "read", listing, [], text)
     return EXIT_OK
 
@@ -127,10 +146,15 @@ def template_sha256(schema: str, template_id: str, blueprint: dict) -> str:
 def cmd_system_agent(args, config, transport) -> int:
     template = json.loads(resources.files("githubbot_core").joinpath("system_agent.json").read_text(encoding="utf-8"))
     schema = template["_meta"]["schema"]
-    data = {"schema": schema, "id": template["id"], "version": __version__,
-            "sha256": template_sha256(schema, template["id"], template["blueprint"]),
-            "capability": {"package": "githubbot-core", "version": __version__, "spi_version": plugins.SPI_VERSION},
-            "blueprint": template["blueprint"], "permissions": config.get("permissions", {})}
+    data = {
+        "schema": schema,
+        "id": template["id"],
+        "version": __version__,
+        "sha256": template_sha256(schema, template["id"], template["blueprint"]),
+        "capability": {"package": "githubbot-core", "version": __version__, "spi_version": plugins.SPI_VERSION},
+        "blueprint": template["blueprint"],
+        "permissions": config.get("permissions", {}),
+    }
     text = f"system agent {data['id']} {data['version']} sha256 {data['sha256']}"
     _emit(args, "system-agent", True, "read", data, [], text)
     return EXIT_OK
@@ -139,18 +163,30 @@ def cmd_system_agent(args, config, transport) -> int:
 def cmd_classify(args, config, transport) -> int:
     classifier = IssueClassifier(config)
     results = [classifier.classify(issue) for issue in _read_issues(Path(args.input))]
-    data = [{"number": r.issue.number, "labels_to_add": r.labels_to_add, "comment_type": r.comment_type,
-             "escalate": r.escalate, "escalate_reason": r.escalate_reason} for r in results]
-    text = "\n".join(f"#{d['number']}: {', '.join(d['labels_to_add']) or '-'}"
-                     + (" [escalate]" if d["escalate"] else "") for d in data)
+    data = [
+        {
+            "number": r.issue.number,
+            "labels_to_add": r.labels_to_add,
+            "comment_type": r.comment_type,
+            "escalate": r.escalate,
+            "escalate_reason": r.escalate_reason,
+        }
+        for r in results
+    ]
+    text = "\n".join(
+        f"#{d['number']}: {', '.join(d['labels_to_add']) or '-'}" + (" [escalate]" if d["escalate"] else "")
+        for d in data
+    )
     _emit(args, "classify", True, "read", data, [], text)
     return EXIT_OK
 
 
 def cmd_duplicates(args, config, transport) -> int:
     candidates = DuplicateDetector(threshold=args.threshold).find_duplicates(_read_issues(Path(args.input)))
-    data = [{"issue": c.issue_number, "original": c.original_number, "similarity": round(c.similarity, 4)}
-            for c in candidates]
+    data = [
+        {"issue": c.issue_number, "original": c.original_number, "similarity": round(c.similarity, 4)}
+        for c in candidates
+    ]
     _emit(args, "duplicates", True, "read", data, [], "\n".join(str(c) for c in candidates) or "no duplicates")
     return EXIT_OK
 
@@ -163,8 +199,11 @@ def cmd_triage(args, config, transport) -> int:
         return EXIT_RUNTIME
     results = triage.classify_all(issues)
     plan = triage.plan(results)
-    extra = {"repo": args.repo, "issues": len(issues),
-             "escalations": [r.issue.number for r in triage.get_escalations(results)]}
+    extra = {
+        "repo": args.repo,
+        "issues": len(issues),
+        "escalations": [r.issue.number for r in triage.get_escalations(results)],
+    }
     if not args.json:
         print(triage.generate_report(results))
     return _plan_output(args, "triage", plan, config, transport, extra)
@@ -177,9 +216,15 @@ def cmd_review_pr(args, config, transport) -> int:
         _emit(args, "review-pr", False, "read", None, [error])
         return EXIT_RUNTIME
     result = reviewer.review(pr)
-    data = {"repo": args.repo, "pr": pr.number, "head_sha": pr.head_sha, "escalate": result.escalate,
-            "escalate_reason": result.escalate_reason, "summary": result.summary,
-            "checks": [{"name": n, "passed": p, "detail": d} for n, p, d in result.policy_check_results]}
+    data = {
+        "repo": args.repo,
+        "pr": pr.number,
+        "head_sha": pr.head_sha,
+        "escalate": result.escalate,
+        "escalate_reason": result.escalate_reason,
+        "summary": result.summary,
+        "checks": [{"name": n, "passed": p, "detail": d} for n, p, d in result.policy_check_results],
+    }
     _emit(args, "review-pr", True, "read", data, [], result.summary)
     return EXIT_OK
 
@@ -194,10 +239,19 @@ def cmd_health(args, config, transport) -> int:
         max_dependabot_alerts_per_repo=int(health_config.get("max_dependabot_alerts_per_repo", 10)),
         max_failed_runs_per_repo=int(health_config.get("max_failed_runs_per_repo", 5)),
     )
-    data = [{"repo": s.repo, "dependabot": s.dependabot_count, "failed_runs": s.failed_runs_count,
-             "open_issues": s.open_issues_count, "open_prs": s.open_pull_requests_count,
-             "code_scanning": s.code_scanning_count, "secret_scanning": s.secret_scanning_count,
-             "errors": s.errors} for s in summaries]
+    data = [
+        {
+            "repo": s.repo,
+            "dependabot": s.dependabot_count,
+            "failed_runs": s.failed_runs_count,
+            "open_issues": s.open_issues_count,
+            "open_prs": s.open_pull_requests_count,
+            "code_scanning": s.code_scanning_count,
+            "secret_scanning": s.secret_scanning_count,
+            "errors": s.errors,
+        }
+        for s in summaries
+    ]
     _emit(args, "health", not errors, "read", data, errors, report)
     return EXIT_RUNTIME if errors else EXIT_OK
 
@@ -213,8 +267,17 @@ def cmd_stars(args, config, transport) -> int:
 def cmd_traffic(args, config, transport) -> int:
     summaries = TrafficFetcher(transport).fetch_all(args.repo)
     errors = [f"{s.repo}: {s.error}" for s in summaries if s.error]
-    data = [{"repo": s.repo, "views": s.views_total, "views_unique": s.views_unique,
-             "clones": s.clones_total, "clones_unique": s.clones_unique, "error": s.error} for s in summaries]
+    data = [
+        {
+            "repo": s.repo,
+            "views": s.views_total,
+            "views_unique": s.views_unique,
+            "clones": s.clones_total,
+            "clones_unique": s.clones_unique,
+            "error": s.error,
+        }
+        for s in summaries
+    ]
     _emit(args, "traffic", not errors, "read", data, errors, generate_traffic_report(summaries))
     return EXIT_RUNTIME if errors else EXIT_OK
 
@@ -234,11 +297,23 @@ def cmd_gate_scaffold(args, config, transport) -> int:
     }
     dest = Path(args.dest)
     existing = [rel for rel in files if (dest / rel).exists()]
-    data = {"dest": str(dest), "namespace": args.namespace, "names": names, "files": sorted(files),
-            "existing": existing}
+    data = {
+        "dest": str(dest),
+        "namespace": args.namespace,
+        "names": names,
+        "files": sorted(files),
+        "existing": existing,
+    }
     if not args.apply:
-        _emit(args, "gate-scaffold", True, "preview", data, [],
-              "would write:\n  " + "\n  ".join(sorted(files)) + "\nnothing written; rerun with --apply")
+        _emit(
+            args,
+            "gate-scaffold",
+            True,
+            "preview",
+            data,
+            [],
+            "would write:\n  " + "\n  ".join(sorted(files)) + "\nnothing written; rerun with --apply",
+        )
         return EXIT_OK
     if existing:
         _emit(args, "gate-scaffold", False, "apply", data, [f"refusing to overwrite {', '.join(existing)}"])
@@ -263,7 +338,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="check gh CLI, credentials and permissions").set_defaults(func=cmd_doctor)
     sub.add_parser("plugins", help="list installed plugins").set_defaults(func=cmd_plugins)
     sub.add_parser("system-agent", help="versioned system agent template of this package").set_defaults(
-        func=cmd_system_agent)
+        func=cmd_system_agent
+    )
 
     p = sub.add_parser("classify", help="classify issues from a JSON file (offline)")
     p.add_argument("--input", required=True)
@@ -297,8 +373,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("run", help="preview or apply the action plan of a plugin")
     p.add_argument("plugin")
-    p.add_argument("--plugin-arg", dest="plugin_args", action="append", default=[],
-                   help="argument passed to the plugin, repeatable")
+    p.add_argument(
+        "--plugin-arg",
+        dest="plugin_args",
+        action="append",
+        default=[],
+        help="argument passed to the plugin, repeatable",
+    )
     add_apply_flags(p)
     p.set_defaults(func=cmd_run)
 
@@ -330,7 +411,7 @@ def main(argv: Optional[list[str]] = None, transport=None) -> int:
     if index is not None and argv[index] == "review-gate":
         from . import review_gate
 
-        return review_gate.main(argv[index + 1:])
+        return review_gate.main(argv[index + 1 :])
     parser = build_parser()
     args = parser.parse_args(argv)
     if not hasattr(args, "json"):

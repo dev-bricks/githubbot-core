@@ -103,10 +103,7 @@ def _parse_utc(value: object, field: str) -> datetime:
 
 def canonical_receipt_bytes(receipt: Mapping[str, object]) -> bytes:
     """Return the one accepted byte representation for signing and dispatch."""
-    return (
-        json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        + "\n"
-    ).encode("utf-8")
+    return (json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
 
 
 def create_receipt(**values: object) -> dict[str, object]:
@@ -243,9 +240,7 @@ def validate_receipt(
             raise ReceiptValidationError("model_review must not contain decision_id")
         if verdict == "approve" and (findings["critical"] or findings["high"]):
             raise ReceiptValidationError("approval cannot contain critical or high findings")
-        if verdict == "reject" and (
-            not isinstance(receipt.get("reason"), str) or not str(receipt["reason"]).strip()
-        ):
+        if verdict == "reject" and (not isinstance(receipt.get("reason"), str) or not str(receipt["reason"]).strip()):
             raise ReceiptValidationError("rejected model_review requires reason")
     else:
         if verdict != "approve":
@@ -369,9 +364,7 @@ def verify_ssh_signature(
         raise ReceiptValidationError(f"SSH signature verification failed: {detail or 'invalid signature'}")
 
 
-def sign_receipt(
-    receipt_path: Path, key_path: Path, output_path: Path, namespace: str = DEFAULT_NAMESPACE
-) -> None:
+def sign_receipt(receipt_path: Path, key_path: Path, output_path: Path, namespace: str = DEFAULT_NAMESPACE) -> None:
     """Sign canonical receipt bytes without leaving an adjacent implicit .sig file."""
     receipt_bytes = receipt_path.read_bytes()
     validate_receipt_bytes(receipt_bytes, now=datetime.now(timezone.utc))
@@ -404,9 +397,7 @@ def sign_receipt(
             timeout=20,
         )
         if result.returncode != 0:
-            raise ReceiptValidationError(
-                f"receipt signing failed: {result.stderr.strip() or result.stdout.strip()}"
-            )
+            raise ReceiptValidationError(f"receipt signing failed: {result.stderr.strip() or result.stdout.strip()}")
         signature_path = Path(f"{temp_receipt}.sig")
         if not signature_path.is_file():
             raise ReceiptValidationError("ssh-keygen did not produce a detached signature")
@@ -625,12 +616,10 @@ def _run_url() -> str | None:
     return None
 
 
-def workflow_pending(
-    repository: str, pr_number: int, head_sha: str, namespace: str = DEFAULT_NAMESPACE
-) -> None:
+def workflow_pending(repository: str, pr_number: int, head_sha: str, namespace: str = DEFAULT_NAMESPACE) -> None:
     token = _resolve_token()
     live = _live_pr(repository, pr_number, token=token)
-    live_sha = ((live.get("head") or {}).get("sha") if isinstance(live.get("head"), Mapping) else None)
+    live_sha = (live.get("head") or {}).get("sha") if isinstance(live.get("head"), Mapping) else None
     if live.get("state") != "open" or live_sha != head_sha:
         raise ReceiptValidationError("pending status target is not the current open PR head")
     _post_status(
@@ -895,9 +884,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "workflow-pending":
             workflow_pending(args.repo, args.pr, args.head_sha, namespace=args.namespace)
         elif args.command == "workflow-dispatch":
-            workflow_dispatch(
-                args.repo, _json_env_payload(), _allowed_signers_from_env(), namespace=args.namespace
-            )
+            workflow_dispatch(args.repo, _json_env_payload(), _allowed_signers_from_env(), namespace=args.namespace)
         elif args.command == "verify":
             receipt_bytes = args.receipt.read_bytes()
             receipt = validate_receipt_bytes(receipt_bytes, now=datetime.now(timezone.utc))

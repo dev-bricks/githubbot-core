@@ -1,4 +1,5 @@
 """Tests fuer IssueClassifier."""
+
 import unittest
 
 
@@ -11,14 +12,12 @@ class TestIssueClassifier(unittest.TestCase):
     def setUp(self):
         """Config mit Standard-Kriterien laden."""
         from githubbot_core.config import default_config
+
         self.config = default_config()
         self.classifier = IssueClassifier(self.config)
 
     def _make_issue(self, title: str, body: str = "", labels: list = None) -> GitHubIssue:
-        return GitHubIssue(
-            number=1, title=title, body=body,
-            labels=labels or [], state="open", author="testuser"
-        )
+        return GitHubIssue(number=1, title=title, body=body, labels=labels or [], state="open", author="testuser")
 
     def test_security_detection(self):
         """Security-Keywords werden erkannt."""

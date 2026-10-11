@@ -33,10 +33,7 @@ REASON_TRAFFIC = (
     "Private Repos liefern über die Traffic-API systematisch keine Werte "
     "(0 Views/0 Clones) und stehen deshalb nicht in den Zahlen oben. "
 )
-REASON_STARS = (
-    "Private Repos werden hier bewusst separat aufgeführt, unabhängig von "
-    "ihrer Sternenzahl. "
-)
+REASON_STARS = "Private Repos werden hier bewusst separat aufgeführt, unabhängig von ihrer Sternenzahl. "
 
 
 def group_repos_by_org(repo_full_names: list[str]) -> dict[str, list[str]]:
@@ -55,8 +52,7 @@ def group_repos_by_org(repo_full_names: list[str]) -> dict[str, list[str]]:
     return {org: sorted(names) for org, names in sorted(groups.items())}
 
 
-def wrap_repo_names(names: list[str], prefix: str, width: int = 80,
-                    indent: str = "    ") -> list[str]:
+def wrap_repo_names(names: list[str], prefix: str, width: int = 80, indent: str = "    ") -> list[str]:
     """
     Bricht eine kommaseparierte Namensliste auf mehrere Zeilen um.
 
@@ -106,8 +102,7 @@ def markdown_archived_section(archived_repos: list[str] | None) -> list[str]:
     return lines
 
 
-def ascii_group_block(heading: str, repo_full_names: list[str] | None,
-                      width: int = 80) -> list[str]:
+def ascii_group_block(heading: str, repo_full_names: list[str] | None, width: int = 80) -> list[str]:
     """Blockabschnitt (Privat/Archiviert) im ASCII-Stil der uebrigen Grafiken."""
     if not repo_full_names:
         return []

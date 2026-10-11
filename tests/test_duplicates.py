@@ -1,10 +1,12 @@
 """Tests fuer DuplicateDetector."""
+
 import unittest
 
 
 from githubbot_core.duplicates import (
     DuplicateDetector,
-    tokenize, jaccard_similarity,
+    tokenize,
+    jaccard_similarity,
 )
 
 
@@ -47,7 +49,7 @@ class TestJaccardSimilarity(unittest.TestCase):
 
     def test_partial_overlap(self):
         sim = jaccard_similarity({"a", "b", "c"}, {"b", "c", "d"})
-        self.assertAlmostEqual(sim, 2/4)  # 0.5
+        self.assertAlmostEqual(sim, 2 / 4)  # 0.5
 
     def test_empty_sets(self):
         self.assertAlmostEqual(jaccard_similarity(set(), set()), 1.0)
@@ -109,9 +111,7 @@ class TestDuplicateDetector(unittest.TestCase):
             {"number": 1, "title": "Application crashes on startup", "body": "Error shown"},
             {"number": 2, "title": "Feature request dark mode", "body": "Add dark mode"},
         ]
-        candidates = self.detector.find_for_new_issue(
-            3, "Application crashes on startup", "Error shown", existing
-        )
+        candidates = self.detector.find_for_new_issue(3, "Application crashes on startup", "Error shown", existing)
         self.assertGreater(len(candidates), 0)
         self.assertEqual(candidates[0].original_number, 1)
 

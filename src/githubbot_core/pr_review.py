@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PullRequest:
     """Repraesentiert einen GitHub Pull Request."""
+
     number: int
     title: str
     body: str
@@ -73,6 +74,7 @@ class PullRequest:
 @dataclass
 class PRReviewResult:
     """Ergebnis der PR-Pruefung."""
+
     pr: PullRequest
     summary: str = ""
     policy_check_results: list[tuple[str, bool, str]] = field(default_factory=list)

@@ -3,6 +3,7 @@
 Slow (creates a venv and builds the wheel), therefore opt-in:
     GITHUBBOT_CORE_CONSUMER_TEST=1 python -m pytest tests/test_consumer_install.py
 """
+
 from __future__ import annotations
 
 import json
@@ -56,8 +57,9 @@ def test_installed_package_cli_without_private_extension(tmp_path: Path) -> None
     assert json.loads(missing.stdout)["data"] == {"error": "plugin_not_available"}
 
     issues = work / "issues.json"
-    issues.write_text(json.dumps([{"number": 1, "title": "Found XSS vulnerability", "body": "", "labels": []}]),
-                      encoding="utf-8")
+    issues.write_text(
+        json.dumps([{"number": 1, "title": "Found XSS vulnerability", "body": "", "labels": []}]), encoding="utf-8"
+    )
     classify = _run([str(cli), "--json", "classify", "--input", str(issues)], cwd=work)
     assert classify.returncode == 0 and "security" in json.loads(classify.stdout)["data"][0]["labels_to_add"]
 

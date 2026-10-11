@@ -27,9 +27,11 @@ logger = logging.getLogger(__name__)
 # DATA CLASSES
 # ============================================================
 
+
 @dataclass
 class CommentTemplate:
     """Ein einzelnes Kommentar-Template."""
+
     key: str
     trigger: str
     template: str
@@ -52,6 +54,7 @@ class CommentTemplate:
 # ============================================================
 # COMMENT MANAGER
 # ============================================================
+
 
 class AutoCommentManager:
     """

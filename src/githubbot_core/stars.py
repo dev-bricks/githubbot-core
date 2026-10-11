@@ -35,6 +35,7 @@ from .report_sections import (  # noqa: E402
 @dataclass
 class RepoStars:
     """Sternenzahl eines Repos."""
+
     repo: str
     stars: int = 0
     error: Optional[str] = None
@@ -107,7 +108,7 @@ def generate_ascii_ranking(
         return "█" * full + ("▌" if half else "") + "·" * (BAR_WIDTH - full - half)
 
     def fmt(name):
-        return (name[:NAME_W - 1] + "…") if len(name) > NAME_W else name.ljust(NAME_W)
+        return (name[: NAME_W - 1] + "…") if len(name) > NAME_W else name.ljust(NAME_W)
 
     valid = [s for s in summaries if not s.error]
     errors = [s for s in summaries if s.error]
@@ -163,6 +164,7 @@ def generate_stars_report(
     als eigene Sektionen am Ende und fliessen NICHT in die Zahlen ein.
     """
     from datetime import date
+
     today = date.today().strftime("%Y-%m-%d")
 
     valid = [s for s in summaries if not s.error]

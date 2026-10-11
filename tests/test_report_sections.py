@@ -9,7 +9,6 @@ beiden Berichten nicht auseinanderdriften -- ein Textunterschied liest sich
 sonst wie ein inhaltlicher.
 """
 
-
 import pytest
 
 
@@ -28,9 +27,14 @@ from githubbot_core.report_sections import (  # noqa: E402
 
 class TestGruppierung:
     def test_sortiert_orgs_und_namen(self):
-        result = group_repos_by_org([
-            "zeta/b", "alpha/z", "alpha/a", "zeta/a",
-        ])
+        result = group_repos_by_org(
+            [
+                "zeta/b",
+                "alpha/z",
+                "alpha/a",
+                "zeta/a",
+            ]
+        )
         assert list(result) == ["alpha", "zeta"]
         assert result["alpha"] == ["a", "z"]
         assert result["zeta"] == ["a", "b"]

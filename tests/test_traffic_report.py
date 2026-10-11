@@ -19,13 +19,17 @@ def _make_summaries():
     return [
         TrafficSummary(
             repo="example-org/alpha",
-            views_total=50, views_unique=20,
-            clones_total=10, clones_unique=5,
+            views_total=50,
+            views_unique=20,
+            clones_total=10,
+            clones_unique=5,
         ),
         TrafficSummary(
             repo="example-org/beta",
-            views_total=0, views_unique=0,
-            clones_total=0, clones_unique=0,
+            views_total=0,
+            views_unique=0,
+            clones_total=0,
+            clones_unique=0,
         ),
     ]
 
@@ -40,9 +44,7 @@ class TestBackwardCompatibility(unittest.TestCase):
     def test_ascii_chart_unchanged_without_new_params(self):
         summaries = _make_summaries()
 
-        self.assertEqual(
-            generate_ascii_chart(summaries), generate_ascii_chart(summaries, None, None)
-        )
+        self.assertEqual(generate_ascii_chart(summaries), generate_ascii_chart(summaries, None, None))
         out = generate_ascii_chart(summaries)
         self.assertNotIn("PRIVATE MODULE", out)
         self.assertNotIn("ARCHIVIERT", out)
@@ -51,9 +53,7 @@ class TestBackwardCompatibility(unittest.TestCase):
     def test_traffic_report_unchanged_without_new_params(self):
         summaries = _make_summaries()
 
-        self.assertEqual(
-            generate_traffic_report(summaries), generate_traffic_report(summaries, None, None)
-        )
+        self.assertEqual(generate_traffic_report(summaries), generate_traffic_report(summaries, None, None))
         out = generate_traffic_report(summaries)
         self.assertIn("**2 Repos** | 14-Tage-Fenster", out)
         self.assertNotIn("Diese Module sind privat", out)
@@ -62,12 +62,8 @@ class TestBackwardCompatibility(unittest.TestCase):
     def test_empty_lists_behave_like_none(self):
         summaries = _make_summaries()
 
-        self.assertEqual(
-            generate_ascii_chart(summaries, [], []), generate_ascii_chart(summaries, None, None)
-        )
-        self.assertEqual(
-            generate_traffic_report(summaries, [], []), generate_traffic_report(summaries, None, None)
-        )
+        self.assertEqual(generate_ascii_chart(summaries, [], []), generate_ascii_chart(summaries, None, None))
+        self.assertEqual(generate_traffic_report(summaries, [], []), generate_traffic_report(summaries, None, None))
 
 
 class TestPrivateReposExcludedFromTotals(unittest.TestCase):
@@ -82,9 +78,7 @@ class TestPrivateReposExcludedFromTotals(unittest.TestCase):
             private_repos=["games-org/AlphaGame", "games-org/BetaGame"],
         )
 
-        self.assertIn(
-            "GESAMT  |  Clones: 10 (5 unique)  |  Views: 50 (20 unique)", without_private
-        )
+        self.assertIn("GESAMT  |  Clones: 10 (5 unique)  |  Views: 50 (20 unique)", without_private)
         self.assertIn(
             "GESAMT  |  Clones: 10 (5 unique)  |  Views: 50 (20 unique)  |  Privat: 2 (siehe oben)",
             with_private,
@@ -110,9 +104,7 @@ class TestPrivateReposExcludedFromTotals(unittest.TestCase):
         private = ["games-org/GhostRepo"]
 
         ascii_out = generate_ascii_chart(summaries, private_repos=private)
-        no_views_line = next(
-            l for l in ascii_out.split("\n") if l.strip().startswith("(keine Views):")
-        )
+        no_views_line = next(l for l in ascii_out.split("\n") if l.strip().startswith("(keine Views):"))
         self.assertNotIn("GhostRepo", no_views_line)
         self.assertIn("GhostRepo", ascii_out)  # aber im Privat-Block weiter unten
 
@@ -189,7 +181,7 @@ class TestAsciiWidth(unittest.TestCase):
         start = next(i for i, l in enumerate(lines) if "PRIVATE MODULE" in l)
         end = next(i for i, l in enumerate(lines) if i > start and l.startswith("=" * 80))
 
-        for line in lines[start - 1:end]:
+        for line in lines[start - 1 : end]:
             self.assertLessEqual(len(line), 80, msg=f"Zeile zu lang: {line!r}")
 
 

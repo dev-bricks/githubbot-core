@@ -130,6 +130,7 @@ my-extension = "my_extension:create"
 from githubbot_core.actions import Action
 from githubbot_core.plugins import SPI_VERSION
 
+
 class MyExtension:
     name = "my-extension"
     spi_version = SPI_VERSION
@@ -137,13 +138,13 @@ class MyExtension:
     def describe(self):
         return {"version": "1.0.0", "capabilities": ["plan"]}
 
-    def plan(self, ctx):                      # ctx.config, ctx.transport (nur lesend), ctx.args
+    def plan(self, ctx):  # ctx.config, ctx.transport (nur lesend), ctx.args
         data, error = ctx.transport.get("repos/owner/repo")
-        return [Action("api.request", {"method": "PUT", "endpoint": "user/starred/owner/repo"},
-                       reason="example")]
+        return [Action("api.request", {"method": "PUT", "endpoint": "user/starred/owner/repo"}, reason="example")]
 
-    def pr_policy_checks(self, pr, files, diff):   # optional
+    def pr_policy_checks(self, pr, files, diff):  # optional
         return [("no_large_binaries", True, "OK")]
+
 
 def create():
     return MyExtension()

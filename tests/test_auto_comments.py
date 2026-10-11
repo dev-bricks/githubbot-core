@@ -1,4 +1,5 @@
 """Tests fuer AutoCommentManager."""
+
 import unittest
 
 
@@ -32,12 +33,9 @@ class TestAutoCommentManager(unittest.TestCase):
             "auto_comments": {
                 "needs_info_bug": {
                     "trigger": "bug_without_details",
-                    "template": "Please provide: version, OS, steps to reproduce"
+                    "template": "Please provide: version, OS, steps to reproduce",
                 },
-                "duplicate_reference": {
-                    "trigger": "duplicate",
-                    "template": "Duplicate of #{original_issue}. Closing."
-                },
+                "duplicate_reference": {"trigger": "duplicate", "template": "Duplicate of #{original_issue}. Closing."},
             }
         }
         self.manager = AutoCommentManager(self.config)
@@ -70,17 +68,13 @@ class TestAutoCommentManager(unittest.TestCase):
 
     def test_check_already_commented_true(self):
         """Erkennt vorhandenen Bot-Kommentar."""
-        comments = [
-            {"body": "Some comment\n<!-- githubbot:needs_info_bug -->"}
-        ]
+        comments = [{"body": "Some comment\n<!-- githubbot:needs_info_bug -->"}]
         result = self.manager.check_already_commented(1, "needs_info_bug", comments)
         self.assertTrue(result)
 
     def test_check_already_commented_false(self):
         """Erkennt fehlenden Bot-Kommentar."""
-        comments = [
-            {"body": "Regular user comment without marker"}
-        ]
+        comments = [{"body": "Regular user comment without marker"}]
         result = self.manager.check_already_commented(1, "needs_info_bug", comments)
         self.assertFalse(result)
 
@@ -91,9 +85,7 @@ class TestAutoCommentManager(unittest.TestCase):
 
     def test_check_different_type(self):
         """Anderer Kommentar-Typ wird nicht verwechselt."""
-        comments = [
-            {"body": "Comment\n<!-- githubbot:duplicate_reference -->"}
-        ]
+        comments = [{"body": "Comment\n<!-- githubbot:duplicate_reference -->"}]
         result = self.manager.check_already_commented(1, "needs_info_bug", comments)
         self.assertFalse(result)
 
