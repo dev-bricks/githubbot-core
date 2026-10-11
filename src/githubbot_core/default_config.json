@@ -1,0 +1,90 @@
+{
+  "_meta": {
+    "schema": "githubbot-core.config/v1",
+    "description": "Neutral defaults. Override with --config <file> layers; permission ceilings can only be narrowed by later layers."
+  },
+  "permissions": {
+    "ceiling": ["issue.add_labels", "issue.comment", "api.request"],
+    "enabled": ["issue.add_labels", "issue.comment"]
+  },
+  "label_schema": {
+    "bug": {"color": "d73a4a", "description": "Something is not working", "auto_apply": true},
+    "feature": {"color": "0075ca", "description": "New feature or enhancement", "auto_apply": true},
+    "question": {"color": "0075ca", "description": "Question or request for help", "auto_apply": true},
+    "security": {"color": "e4e669", "description": "Security relevant issue", "auto_apply": true, "escalate": true},
+    "duplicate": {"color": "cfd3d7", "description": "Duplicate of an existing issue", "auto_apply": true, "threshold": 0.8},
+    "needs-info": {"color": "e4e669", "description": "More information needed", "auto_apply": true},
+    "documentation": {"color": "0075ca", "description": "Documentation", "auto_apply": true},
+    "good-first-issue": {"color": "7057ff", "description": "Good for newcomers", "auto_apply": false, "requires_human": true}
+  },
+  "triage_criteria": {
+    "security_public": {
+      "description": "Publicly reported security vulnerability",
+      "labels": ["security"],
+      "auto_comment": "security_private_reporting",
+      "detection": {"keywords": ["security", "vulnerability", "exploit", "injection", "xss", "rce", "cve", "sicherheit", "luecke"]}
+    },
+    "bug_with_steps": {
+      "description": "Bug report with reproduction steps",
+      "labels": ["bug"],
+      "priority": "high",
+      "detection": {"keywords": ["error", "traceback", "exception", "crash", "fails", "broken", "not working", "fehler", "absturz"], "has_steps": true}
+    },
+    "bug_without_details": {
+      "description": "Bug report without enough details",
+      "labels": ["bug", "needs-info"],
+      "auto_comment": "needs_info_bug",
+      "detection": {"keywords": ["error", "traceback", "exception", "crash", "fails", "not working", "fehler", "funktioniert nicht"]}
+    },
+    "feature_request": {
+      "description": "Feature request",
+      "labels": ["feature"],
+      "detection": {"keywords": ["feature", "request", "enhancement", "add", "support", "implement", "would be nice", "vorschlag", "hinzufuegen"]}
+    },
+    "question": {
+      "description": "Question or request for help",
+      "labels": ["question"],
+      "auto_comment": "question_docs_hint",
+      "detection": {"keywords": ["how", "what", "why", "help", "question", "wie", "was", "warum", "hilfe", "how to"]}
+    },
+    "documentation": {
+      "description": "Documentation issue",
+      "labels": ["documentation"],
+      "detection": {"keywords": ["docs", "documentation", "readme", "typo", "spelling", "doku", "anleitung"]}
+    },
+    "unclear": {
+      "description": "Unclear or uncategorised request",
+      "labels": ["needs-info"],
+      "escalate": true
+    }
+  },
+  "auto_comments": {
+    "needs_info_bug": {
+      "trigger": "bug_without_details",
+      "template": "Thank you for the report! To help debug this, please provide:\n- Software version\n- Python version and OS\n- Steps to reproduce\n- Full error message/traceback\n\nThis will help us fix the issue faster!"
+    },
+    "question_docs_hint": {
+      "trigger": "question",
+      "template": "Thanks for your question! Please check the README and any available documentation first.\n\nIf you don't find an answer there, feel free to continue the discussion here!"
+    },
+    "security_private_reporting": {
+      "trigger": "security_public",
+      "template": "Thank you for your security report! **Please do not report security vulnerabilities publicly.**\n\nInstead, use [GitHub's private vulnerability reporting](../../security/advisories/new) to report this privately. This helps protect users while we work on a fix."
+    }
+  },
+  "pr_review": {
+    "summary_threshold_lines": 200
+  },
+  "health": {
+    "failed_runs_window_days": 14,
+    "max_failed_runs_per_repo": 5,
+    "max_dependabot_alerts_per_repo": 10,
+    "max_open_issues_per_repo": 10,
+    "max_open_prs_per_repo": 10,
+    "max_code_scanning_alerts_per_repo": 20,
+    "max_secret_scanning_alerts_per_repo": 20,
+    "check_copilot_autofix": true,
+    "max_copilot_autofix_checks_per_repo": 10,
+    "check_metadata": true
+  }
+}

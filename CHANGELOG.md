@@ -1,0 +1,23 @@
+# Changelog / Änderungsprotokoll
+
+Alle wesentlichen Änderungen an diesem Projekt werden hier dokumentiert.
+All notable changes to this project are documented here.
+Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-10-11
+
+### Hinzugefügt / Added
+
+- Installierbares Paket `githubbot-core` mit CLI `githubbot-core` und JSON-Ergebnishülle
+  `githubbot-core.result/v1` / installable package with CLI and JSON result envelope.
+- Issue-Triage, Duplikaterkennung, PR-Zusammenfassung, Health-/Traffic-/Sterne-Berichte /
+  issue triage, duplicate detection, PR summary, health/traffic/star reports.
+- Vorschau/Ausführen-Vertrag mit Rechteobergrenze, Belegen und Idempotenz /
+  preview/apply contract with permission ceiling, receipts and idempotency.
+- Geschichtete Konfiguration, Obergrenzen nur einengbar / layered configuration, ceilings narrow-only.
+- Plugin-SPI v1 (Entry-Point-Gruppe `githubbot_core.plugins`) / plugin SPI v1.
+- Credential-Adapter (Umgebung, `gh auth token`) mit Schwärzung / credential adapter with redaction.
+- Namensraumunabhängiges Exact-SHA-Review-Gate samt Workflow-Scaffold /
+  namespace-independent exact-SHA review gate with workflow scaffold.

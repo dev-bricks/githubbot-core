@@ -1,0 +1,24 @@
+# githubbot-core
+
+> Neutral, installable GitHub maintenance core (Python standard library only): issue triage,
+> duplicate detection, PR summaries, read-only health/traffic/star reports, a preview/apply
+> contract for every write, a plugin SPI and signed exact-SHA review receipts.
+
+Languages: en, de
+
+## Entry points
+
+- CLI: `githubbot-core --help` (also `python -m githubbot_core`); add `--json` for the
+  `githubbot-core.result/v1` envelope. Writes need `--apply`; default is preview.
+- Python API: `githubbot_core.triage`, `githubbot_core.actions`, `githubbot_core.health`,
+  `githubbot_core.traffic`, `githubbot_core.stars`, `githubbot_core.pr_review`,
+  `githubbot_core.plugins`, `githubbot_core.review_gate`, `githubbot_core.credentials`.
+- Plugin SPI v1: entry-point group `githubbot_core.plugins`, factory returning an object with
+  `name`, `spi_version`, `describe()`, optional `plan(ctx)` and `pr_policy_checks(pr, files, diff)`.
+
+## Docs
+
+- [README](README.md) / [README (Deutsch)](README_de.md)
+- [Review gate](docs/REVIEW_GATE.md)
+- [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
