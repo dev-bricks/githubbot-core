@@ -60,13 +60,16 @@ def test_model_review_receipt_is_canonical_and_valid() -> None:
     assert encoded.endswith(b"\n")
     assert json.loads(encoded) == receipt
     assert receipt["schema"] == RECEIPT_SCHEMA
-    assert validate_receipt_bytes(
-        encoded,
-        expected_repository="example-org/example-repo",
-        expected_pr_number=6,
-        expected_head_sha="2f9e8f6fe280e2449b2d6081ef55a5cfdee431ea",
-        now=_now(),
-    ) == receipt
+    assert (
+        validate_receipt_bytes(
+            encoded,
+            expected_repository="example-org/example-repo",
+            expected_pr_number=6,
+            expected_head_sha="2f9e8f6fe280e2449b2d6081ef55a5cfdee431ea",
+            now=_now(),
+        )
+        == receipt
+    )
 
 
 def test_receipt_rejects_noncanonical_bytes_and_wrong_head() -> None:
@@ -342,9 +345,7 @@ def test_cli_sign_writes_only_the_requested_signature(tmp_path: Path) -> None:
     receipt.write_bytes(canonical_receipt_bytes(current_receipt))
     signature = tmp_path / "signed" / "receipt.sig"
 
-    assert review_gate.main(
-        ["sign", "--receipt", str(receipt), "--key", str(key), "--output", str(signature)]
-    ) == 0
+    assert review_gate.main(["sign", "--receipt", str(receipt), "--key", str(key), "--output", str(signature)]) == 0
     assert signature.is_file()
     assert not Path(f"{receipt}.sig").exists()
 
@@ -411,8 +412,6 @@ def test_protection_plan_refuses_to_overwrite_a_rollback(tmp_path: Path) -> None
     rollback = output / "rollback.json"
     rollback.write_text("do not overwrite\n", encoding="utf-8")
 
-    assert review_gate.main(
-        ["protection-plan", "--current", str(current), "--output-dir", str(output)]
-    ) == 2
+    assert review_gate.main(["protection-plan", "--current", str(current), "--output-dir", str(output)]) == 2
     assert rollback.read_text(encoding="utf-8") == "do not overwrite\n"
     assert not (output / "desired.json").exists()

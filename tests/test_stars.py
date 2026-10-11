@@ -20,9 +20,7 @@ class TestStarsFetcher(unittest.TestCase):
 
     @patch("githubbot_core.transport.subprocess.run")
     def test_fetch_reads_stargazers_count(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(
-            [], 0, json.dumps({"stargazers_count": 42}), ""
-        )
+        mock_run.return_value = subprocess.CompletedProcess([], 0, json.dumps({"stargazers_count": 42}), "")
 
         fetcher = StarsFetcher()
         result = fetcher.fetch("org/repo")
@@ -141,9 +139,7 @@ class TestBackwardCompatibilityWithPrivateArchived(unittest.TestCase):
     def test_ascii_ranking_unchanged_without_new_params(self):
         summaries = [RepoStars(repo="org/a", stars=5), RepoStars(repo="org/b", stars=1)]
 
-        self.assertEqual(
-            generate_ascii_ranking(summaries), generate_ascii_ranking(summaries, None, None)
-        )
+        self.assertEqual(generate_ascii_ranking(summaries), generate_ascii_ranking(summaries, None, None))
         out = generate_ascii_ranking(summaries)
         self.assertNotIn("PRIVATE MODULE", out)
         self.assertNotIn("ARCHIVIERT", out)
@@ -152,9 +148,7 @@ class TestBackwardCompatibilityWithPrivateArchived(unittest.TestCase):
     def test_stars_report_unchanged_without_new_params(self):
         summaries = [RepoStars(repo="org/a", stars=5), RepoStars(repo="org/b", stars=1)]
 
-        self.assertEqual(
-            generate_stars_report(summaries), generate_stars_report(summaries, None, None)
-        )
+        self.assertEqual(generate_stars_report(summaries), generate_stars_report(summaries, None, None))
         out = generate_stars_report(summaries)
         self.assertIn("**2 Repos** | **6 Stars gesamt**", out)
         self.assertNotIn("Diese Module sind privat", out)
@@ -163,12 +157,8 @@ class TestBackwardCompatibilityWithPrivateArchived(unittest.TestCase):
     def test_empty_lists_behave_like_none(self):
         summaries = [RepoStars(repo="org/a", stars=5)]
 
-        self.assertEqual(
-            generate_ascii_ranking(summaries, [], []), generate_ascii_ranking(summaries, None, None)
-        )
-        self.assertEqual(
-            generate_stars_report(summaries, [], []), generate_stars_report(summaries, None, None)
-        )
+        self.assertEqual(generate_ascii_ranking(summaries, [], []), generate_ascii_ranking(summaries, None, None))
+        self.assertEqual(generate_stars_report(summaries, [], []), generate_stars_report(summaries, None, None))
 
 
 class TestPrivateReposExcludedFromStarsTotals(unittest.TestCase):
@@ -280,7 +270,7 @@ class TestStarsAsciiWidth(unittest.TestCase):
         start = next(i for i, l in enumerate(lines) if "PRIVATE MODULE" in l)
         end = next(i for i, l in enumerate(lines) if i > start and l.startswith("=" * 80))
 
-        for line in lines[start - 1:end]:
+        for line in lines[start - 1 : end]:
             self.assertLessEqual(len(line), 80, msg=f"Zeile zu lang: {line!r}")
 
     def test_gesamt_line_stays_within_width_with_private_count(self):

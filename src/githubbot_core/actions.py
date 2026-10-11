@@ -116,14 +116,23 @@ def apply(
     """Execute permitted actions. Every action gets exactly one receipt."""
     digest = plan_digest(actions)
     if expected_plan_sha256 and expected_plan_sha256 != digest:
-        return {"mode": "apply", "plan_sha256": digest, "receipts": [], "writes": 0,
-                "error": "plan changed since preview (plan_sha256 mismatch); nothing applied"}
+        return {
+            "mode": "apply",
+            "plan_sha256": digest,
+            "receipts": [],
+            "writes": 0,
+            "error": "plan changed since preview (plan_sha256 mismatch); nothing applied",
+        }
     applied_before = _load_applied(receipt_store)
     receipts: list[dict[str, Any]] = []
     writes = 0
     for action in actions:
-        record: dict[str, Any] = {"id": action.action_id, "kind": action.kind, "source": action.source,
-                                  "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        record: dict[str, Any] = {
+            "id": action.action_id,
+            "kind": action.kind,
+            "source": action.source,
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
         reason = denial_reason(action, config)
         if reason:
             record.update(status="denied", detail=reason)

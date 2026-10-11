@@ -1,4 +1,5 @@
 """Repository metadata: required root documents, license and packaging rules."""
+
 from __future__ import annotations
 
 import sys
@@ -10,8 +11,18 @@ else:  # pragma: no cover
     tomllib = None
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED = ["README.md", "README_de.md", "LICENSE", ".gitignore", "CHANGELOG.md", "SECURITY.md",
-            "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "THIRD_PARTY_LICENSES.md", "pyproject.toml"]
+REQUIRED = [
+    "README.md",
+    "README_de.md",
+    "LICENSE",
+    ".gitignore",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "THIRD_PARTY_LICENSES.md",
+    "pyproject.toml",
+]
 
 
 def test_required_root_documents_exist():

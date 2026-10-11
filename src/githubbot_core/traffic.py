@@ -37,6 +37,7 @@ from .report_sections import (  # noqa: E402
 @dataclass
 class TrafficSummary:
     """Zusammengefasste Traffic-Daten eines Repos (14-Tage-Fenster)."""
+
     repo: str
     views_total: int = 0
     views_unique: int = 0
@@ -59,17 +60,11 @@ class TrafficSummary:
         ]
 
         if self.top_referrers:
-            refs = ", ".join(
-                f"{r['referrer']} ({r['count']})"
-                for r in self.top_referrers[:3]
-            )
+            refs = ", ".join(f"{r['referrer']} ({r['count']})" for r in self.top_referrers[:3])
             lines.append(f"  Referrer: {refs}")
 
         if self.top_paths:
-            paths = ", ".join(
-                f"{p['path']} ({p['count']})"
-                for p in self.top_paths[:3]
-            )
+            paths = ", ".join(f"{p['path']} ({p['count']})" for p in self.top_paths[:3])
             lines.append(f"  Top-Pfade: {paths}")
 
         return "\n".join(lines)
@@ -157,7 +152,7 @@ def bar(val: int, max_val: int) -> str:
 
 def fmt(name: str) -> str:
     """Repo-Name auf feste Spaltenbreite, zu lange Namen mit Auslassung."""
-    return (name[:NAME_W - 1] + "…") if len(name) > NAME_W else name.ljust(NAME_W)
+    return (name[: NAME_W - 1] + "…") if len(name) > NAME_W else name.ljust(NAME_W)
 
 
 def generate_ascii_chart(
@@ -178,17 +173,17 @@ def generate_ascii_chart(
 
     valid = [s for s in summaries if not s.error]
     max_clones = max((s.clones_total for s in valid), default=1)
-    max_views  = max((s.views_total  for s in valid), default=1)
+    max_views = max((s.views_total for s in valid), default=1)
 
     by_clones = sorted(valid, key=lambda s: s.clones_total, reverse=True)
-    by_views  = sorted(valid, key=lambda s: s.views_total,  reverse=True)
-    with_views  = [s for s in by_views if s.views_total > 0]
-    no_views    = [s for s in by_views if s.views_total == 0]
+    by_views = sorted(valid, key=lambda s: s.views_total, reverse=True)
+    with_views = [s for s in by_views if s.views_total > 0]
+    no_views = [s for s in by_views if s.views_total == 0]
 
-    total_clones = sum(s.clones_total  for s in valid)
-    total_cu     = sum(s.clones_unique for s in valid)
-    total_views  = sum(s.views_total   for s in valid)
-    total_vu     = sum(s.views_unique  for s in valid)
+    total_clones = sum(s.clones_total for s in valid)
+    total_cu = sum(s.clones_unique for s in valid)
+    total_views = sum(s.views_total for s in valid)
+    total_vu = sum(s.views_unique for s in valid)
 
     W = 80
     lines = [
@@ -205,7 +200,7 @@ def generate_ascii_chart(
 
     for s in by_clones:
         name = s.repo.split("/")[1]
-        val  = f"{s.clones_total:>4} /{s.clones_unique:>3}u"
+        val = f"{s.clones_total:>4} /{s.clones_unique:>3}u"
         lines.append(f"  {fmt(name)}  {val}  {bar(s.clones_total, max_clones)}")
 
     lines += [
@@ -218,7 +213,7 @@ def generate_ascii_chart(
 
     for s in with_views:
         name = s.repo.split("/")[1]
-        val  = f"{s.views_total:>4} /{s.views_unique:>3}u"
+        val = f"{s.views_total:>4} /{s.views_unique:>3}u"
         lines.append(f"  {fmt(name)}  {val}  {bar(s.views_total, max_views)}")
 
     if no_views:
@@ -229,8 +224,7 @@ def generate_ascii_chart(
     lines += ascii_group_block(ARCHIVED_HEADING_ASCII, archived_repos, W)
 
     gesamt_line = (
-        f"  GESAMT  |  Clones: {total_clones} ({total_cu} unique)  |  "
-        f"Views: {total_views} ({total_vu} unique)"
+        f"  GESAMT  |  Clones: {total_clones} ({total_cu} unique)  |  Views: {total_views} ({total_vu} unique)"
     )
     if private_repos:
         gesamt_line += f"  |  Privat: {len(private_repos)} (siehe oben)"
@@ -354,8 +348,11 @@ def generate_ascii_chart_by_group(
     ]
     lines += section("VIEWS", "Views", lambda s: s.views_total, lambda s: s.views_unique, max_views)
     lines += section(
-        "CLONES (Downloads)", "Clones",
-        lambda s: s.clones_total, lambda s: s.clones_unique, max_clones,
+        "CLONES (Downloads)",
+        "Clones",
+        lambda s: s.clones_total,
+        lambda s: s.clones_unique,
+        max_clones,
     )
 
     lines += ascii_group_block(PRIVATE_HEADING_ASCII, private_repos, W)
@@ -366,8 +363,7 @@ def generate_ascii_chart_by_group(
     total_clones = sum(s.clones_total for s in valid)
     total_cu = sum(s.clones_unique for s in valid)
     gesamt_line = (
-        f"  GESAMT  |  Views: {total_views} ({total_vu} unique)  |  "
-        f"Clones: {total_clones} ({total_cu} unique)"
+        f"  GESAMT  |  Views: {total_views} ({total_vu} unique)  |  Clones: {total_clones} ({total_cu} unique)"
     )
     if private_repos:
         gesamt_line += f"  |  Privat: {len(private_repos)} (siehe oben)"
@@ -389,6 +385,7 @@ def generate_traffic_report(
     als eigene Sektionen am Ende und fliessen NICHT in die Zahlen ein.
     """
     from datetime import date
+
     today = date.today().strftime("%Y-%m-%d")
 
     if private_repos:

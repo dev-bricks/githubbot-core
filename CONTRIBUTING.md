@@ -37,6 +37,7 @@ gelten Pull Requests unter der Lizenz des Projekts.
 pip install -e ".[dev]"
 python -m pytest
 ruff check .
+ruff format --check .
 ```
 
 Schreibende Funktionen laufen ausschließlich über `githubbot_core.actions` (Vorschau/Ausführen,
@@ -81,6 +82,7 @@ pull requests are understood to be submitted under the project's license.
 pip install -e ".[dev]"
 python -m pytest
 ruff check .
+ruff format --check .
 ```
 
 Every write goes through `githubbot_core.actions` (preview/apply, permission

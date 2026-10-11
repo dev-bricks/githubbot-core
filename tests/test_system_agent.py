@@ -1,4 +1,5 @@
 """System agent template: versioned, hashed, shaped like the agent-studio blueprint payload."""
+
 from __future__ import annotations
 
 import hashlib
@@ -18,8 +19,9 @@ EXECUTABLE_MODUS = {"casualis", "usus"}
 
 def _recompute(d: dict) -> str:
     material = {"schema": d["schema"], "id": d["id"], "blueprint": d["blueprint"]}
-    return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":"),
-                                     ensure_ascii=False).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
 
 
 def _system_agent(capsys, *extra: str) -> dict:
@@ -35,9 +37,10 @@ def test_template_identity_is_version_plus_canonical_hash(capsys):
     assert data["schema"] == "githubbot-core.system-agent/v1"
     assert data["id"] == "githubbot" and data["version"] == __version__
     assert data["sha256"] == _recompute(data)  # consumer view: printed output alone suffices
-    assert data["sha256"] == _recompute({"schema": template["_meta"]["schema"], "id": template["id"],
-                                         "blueprint": template["blueprint"]})
-    assert data["sha256"].startswith("2e72c000")  # pinned: v0.2.0 blueprint content, BACH contract
+    assert data["sha256"] == _recompute(
+        {"schema": template["_meta"]["schema"], "id": template["id"], "blueprint": template["blueprint"]}
+    )
+    assert data["sha256"].startswith("2e72c000")  # pinned: v0.2.0 blueprint content, consumer contract
     assert data["capability"] == {"package": "githubbot-core", "version": __version__, "spi_version": 1}
 
 

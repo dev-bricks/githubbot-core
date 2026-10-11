@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # HELPER
 # ============================================================
 
+
 def tokenize(text: str) -> set[str]:
     """
     Normalisiert und tokenisiert Text fuer Aehnlichkeitsvergleich.
@@ -32,12 +33,44 @@ def tokenize(text: str) -> set[str]:
     - Stopwoerter entfernen (einfache Liste)
     """
     STOPWORDS = {
-        "the", "a", "an", "is", "it", "in", "on", "at", "to", "for",
-        "of", "with", "and", "or", "not", "are", "was", "has", "have",
-        "i", "my", "me", "ich", "mein", "das", "die", "der", "und",
-        "oder", "nicht", "ein", "eine", "beim", "ist", "im", "von"
+        "the",
+        "a",
+        "an",
+        "is",
+        "it",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "and",
+        "or",
+        "not",
+        "are",
+        "was",
+        "has",
+        "have",
+        "i",
+        "my",
+        "me",
+        "ich",
+        "mein",
+        "das",
+        "die",
+        "der",
+        "und",
+        "oder",
+        "nicht",
+        "ein",
+        "eine",
+        "beim",
+        "ist",
+        "im",
+        "von",
     }
-    tokens = set(re.findall(r'[a-z0-9]+', text.lower()))
+    tokens = set(re.findall(r"[a-z0-9]+", text.lower()))
     return tokens - STOPWORDS
 
 
@@ -56,9 +89,11 @@ def jaccard_similarity(set_a: set, set_b: set) -> float:
 # DATA CLASSES
 # ============================================================
 
+
 @dataclass
 class DuplicateCandidate:
     """Ein moegliches Duplikat-Paar."""
+
     issue_number: int
     issue_title: str
     original_number: int
@@ -81,6 +116,7 @@ class DuplicateCandidate:
 # ============================================================
 # DETECTOR
 # ============================================================
+
 
 class DuplicateDetector:
     """
@@ -139,11 +175,7 @@ class DuplicateDetector:
                 fp = self.fingerprint(issue.number, issue.title, issue.body)
             else:
                 # Dict-Interface
-                fp = self.fingerprint(
-                    issue["number"],
-                    issue.get("title", ""),
-                    issue.get("body", "")
-                )
+                fp = self.fingerprint(issue["number"], issue.get("title", ""), issue.get("body", ""))
             fingerprints.append(fp)
 
         candidates = []
@@ -192,18 +224,18 @@ class DuplicateDetector:
             else:
                 if issue["number"] == new_issue_number:
                     continue
-                fp_existing = self.fingerprint(
-                    issue["number"], issue.get("title", ""), issue.get("body", "")
-                )
+                fp_existing = self.fingerprint(issue["number"], issue.get("title", ""), issue.get("body", ""))
 
             sim = jaccard_similarity(fp_new["tokens"], fp_existing["tokens"])
             if sim >= self.threshold:
-                candidates.append(DuplicateCandidate(
-                    issue_number=new_issue_number,
-                    issue_title=new_title,
-                    original_number=fp_existing["number"],
-                    original_title=fp_existing["title"],
-                    similarity=sim,
-                ))
+                candidates.append(
+                    DuplicateCandidate(
+                        issue_number=new_issue_number,
+                        issue_title=new_title,
+                        original_number=fp_existing["number"],
+                        original_title=fp_existing["title"],
+                        similarity=sim,
+                    )
+                )
 
         return sorted(candidates, key=lambda c: c.similarity, reverse=True)

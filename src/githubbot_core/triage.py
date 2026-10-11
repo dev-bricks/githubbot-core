@@ -28,9 +28,11 @@ logger = logging.getLogger(__name__)
 # DATA CLASSES
 # ============================================================
 
+
 @dataclass
 class GitHubIssue:
     """Repraesentiert ein GitHub Issue."""
+
     number: int
     title: str
     body: str
@@ -69,6 +71,7 @@ class GitHubIssue:
 @dataclass
 class TriageResult:
     """Ergebnis der Triage fuer ein Issue."""
+
     issue: GitHubIssue
     labels_to_add: list[str] = field(default_factory=list)
     comment: Optional[str] = None
@@ -81,13 +84,19 @@ class TriageResult:
 # CLASSIFIER
 # ============================================================
 
+
 class IssueClassifier:
     """Klassifiziert Issues nach den Triage-Kriterien aus der Config."""
 
     PRIORITY_ORDER = [
-        "security_public", "core_change", "bug_with_steps",
-        "bug_without_details", "feature_request", "question",
-        "documentation", "unclear",
+        "security_public",
+        "core_change",
+        "bug_with_steps",
+        "bug_without_details",
+        "feature_request",
+        "question",
+        "documentation",
+        "unclear",
     ]
 
     def __init__(self, config: dict):
@@ -163,6 +172,7 @@ class IssueClassifier:
 # TRIAGE
 # ============================================================
 
+
 class IssueTriage:
     """Laedt Issues, klassifiziert sie und plant Aktionen. Schreibt selbst nie."""
 
@@ -191,20 +201,30 @@ class IssueTriage:
         for result in results:
             number = result.issue.number
             if result.labels_to_add:
-                actions.append(Action("issue.add_labels",
-                                      {"repo": self.repo, "number": number, "labels": result.labels_to_add},
-                                      reason=f"triage #{number}"))
+                actions.append(
+                    Action(
+                        "issue.add_labels",
+                        {"repo": self.repo, "number": number, "labels": result.labels_to_add},
+                        reason=f"triage #{number}",
+                    )
+                )
             if result.comment and result.comment_type:
                 existing, error = self.transport.get_paginated(
-                    f"repos/{self.repo}/issues/{number}/comments?per_page=100")
+                    f"repos/{self.repo}/issues/{number}/comments?per_page=100"
+                )
                 if error:
                     logger.warning("#%d: Kommentare nicht lesbar, Kommentar wird nicht geplant: %s", number, error)
                     continue
                 if self.comments.check_already_commented(number, result.comment_type, existing):
                     continue
                 body = self.comments.add_marker(result.comment, result.comment_type)
-                actions.append(Action("issue.comment", {"repo": self.repo, "number": number, "body": body},
-                                      reason=f"auto comment {result.comment_type} #{number}"))
+                actions.append(
+                    Action(
+                        "issue.comment",
+                        {"repo": self.repo, "number": number, "body": body},
+                        reason=f"auto comment {result.comment_type} #{number}",
+                    )
+                )
         return actions
 
     @staticmethod

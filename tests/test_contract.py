@@ -1,4 +1,5 @@
 """Contract tests: preview/apply, permission ceilings, config layering, plugin SPI, CLI."""
+
 from __future__ import annotations
 
 import json
@@ -15,12 +16,31 @@ from githubbot_core.transport import ReadOnlyTransport
 
 REPO = "example-org/example-repo"
 ISSUES = [
-    {"number": 1, "title": "How do I configure the output?", "body": "", "labels": [],
-     "user": {"login": "someone"}, "created_at": "2026-01-01T00:00:00Z"},
-    {"number": 2, "title": "Found XSS vulnerability", "body": "", "labels": [],
-     "user": {"login": "someone"}, "created_at": "2026-01-01T00:00:00Z"},
-    {"number": 3, "title": "a pull request", "body": "", "labels": [], "pull_request": {},
-     "user": {"login": "someone"}, "created_at": "2026-01-01T00:00:00Z"},
+    {
+        "number": 1,
+        "title": "How do I configure the output?",
+        "body": "",
+        "labels": [],
+        "user": {"login": "someone"},
+        "created_at": "2026-01-01T00:00:00Z",
+    },
+    {
+        "number": 2,
+        "title": "Found XSS vulnerability",
+        "body": "",
+        "labels": [],
+        "user": {"login": "someone"},
+        "created_at": "2026-01-01T00:00:00Z",
+    },
+    {
+        "number": 3,
+        "title": "a pull request",
+        "body": "",
+        "labels": [],
+        "pull_request": {},
+        "user": {"login": "someone"},
+        "created_at": "2026-01-01T00:00:00Z",
+    },
 ]
 
 
@@ -33,6 +53,7 @@ def _triage_gets():
 
 
 # ---------------------------------------------------------------- preview/apply
+
 
 def test_preview_writes_nothing(fake_transport, capsys):
     transport = fake_transport(_triage_gets())
@@ -64,8 +85,12 @@ def test_apply_writes_only_permitted_actions_and_is_idempotent(fake_transport, t
 
 def test_apply_refuses_changed_plan(fake_transport):
     transport = fake_transport()
-    result = actions.apply([Action("issue.comment", {"repo": REPO, "number": 1, "body": "x"})], transport,
-                           default_config(), expected_plan_sha256="0" * 64)
+    result = actions.apply(
+        [Action("issue.comment", {"repo": REPO, "number": 1, "body": "x"})],
+        transport,
+        default_config(),
+        expected_plan_sha256="0" * 64,
+    )
     assert result["writes"] == 0 and "mismatch" in result["error"]
     assert transport.writes == []
 
@@ -79,9 +104,12 @@ def test_disabled_action_is_denied_not_written(fake_transport):
 
 
 def test_api_request_needs_matching_prefix(fake_transport):
-    config = merge_layers([("default", default_config()),
-                           ("profile", {"permissions": {"enabled": ["api.request"],
-                                                        "api_write_prefixes": ["user/starred/"]}})])
+    config = merge_layers(
+        [
+            ("default", default_config()),
+            ("profile", {"permissions": {"enabled": ["api.request"], "api_write_prefixes": ["user/starred/"]}}),
+        ]
+    )
     allowed = Action("api.request", {"method": "PUT", "endpoint": "user/starred/o/r"})
     other = Action("api.request", {"method": "PUT", "endpoint": "user/following/someone"})
     sneaky = Action("api.request", {"method": "PUT", "endpoint": "user/starred/../following/x"})
@@ -101,17 +129,21 @@ def test_failed_write_is_reported(fake_transport, capsys):
 
 # ---------------------------------------------------------------- config layering
 
+
 def test_later_layer_cannot_widen_ceiling():
     with pytest.raises(ConfigError, match="may only be narrowed"):
-        merge_layers([("default", default_config()),
-                      ("profile", {"permissions": {"ceiling": ["issue.comment"], "enabled": ["issue.comment"]}}),
-                      ("local", {"permissions": {"ceiling": ["issue.comment", "api.request"]}})])
+        merge_layers(
+            [
+                ("default", default_config()),
+                ("profile", {"permissions": {"ceiling": ["issue.comment"], "enabled": ["issue.comment"]}}),
+                ("local", {"permissions": {"ceiling": ["issue.comment", "api.request"]}}),
+            ]
+        )
 
 
 def test_enabled_must_stay_inside_ceiling():
     with pytest.raises(ConfigError, match="exceeds"):
-        merge_layers([("default", default_config()),
-                      ("profile", {"permissions": {"ceiling": ["issue.comment"]}})])
+        merge_layers([("default", default_config()), ("profile", {"permissions": {"ceiling": ["issue.comment"]}})])
 
 
 def test_api_prefixes_narrow_only():
@@ -128,6 +160,7 @@ def test_bad_config_file_exit_code(tmp_path, fake_transport):
 
 
 # ---------------------------------------------------------------- plugin SPI
+
 
 class _DemoPlugin:
     name = "demo"
@@ -192,8 +225,10 @@ def test_plugin_plan_preview_and_denied_apply(demo_plugin, fake_transport, capsy
 
 def test_plugin_plan_apply_when_profile_allows(demo_plugin, fake_transport, tmp_path, capsys):
     profile = tmp_path / "profile.json"
-    profile.write_text(json.dumps({"permissions": {"enabled": ["api.request"],
-                                                   "api_write_prefixes": ["user/starred/"]}}), encoding="utf-8")
+    profile.write_text(
+        json.dumps({"permissions": {"enabled": ["api.request"], "api_write_prefixes": ["user/starred/"]}}),
+        encoding="utf-8",
+    )
     transport = fake_transport()
     assert cli.main(["--config", str(profile), "--json", "run", "demo", "--apply"], transport=transport) == 0
     assert transport.writes == [("PUT", "user/starred/o/r", None)]
@@ -219,6 +254,7 @@ def test_pr_review_without_plugins_is_size_only():
 
 # ---------------------------------------------------------------- credentials
 
+
 def test_credentials_resolve_from_env_and_redact():
     token, provider = resolve_token([EnvTokenProvider(environ={"GITHUB_TOKEN": "tok-123"})])
     assert (token, provider) == ("tok-123", "env")
@@ -229,12 +265,18 @@ def test_credentials_resolve_from_env_and_redact():
 
 # ---------------------------------------------------------------- offline CLI + scaffold
 
+
 def test_offline_classify_and_duplicates(tmp_path, capsys, fake_transport):
     data = tmp_path / "issues.json"
-    data.write_text(json.dumps([
-        {"number": 1, "title": "Crash on save in editor", "body": "", "labels": []},
-        {"number": 2, "title": "Crash on save in editor", "body": "", "labels": []},
-    ]), encoding="utf-8")
+    data.write_text(
+        json.dumps(
+            [
+                {"number": 1, "title": "Crash on save in editor", "body": "", "labels": []},
+                {"number": 2, "title": "Crash on save in editor", "body": "", "labels": []},
+            ]
+        ),
+        encoding="utf-8",
+    )
     assert cli.main(["--json", "duplicates", "--input", str(data)], transport=fake_transport()) == 0
     assert json.loads(capsys.readouterr().out)["data"][0]["original"] == 1
     assert cli.main(["--json", "classify", "--input", str(data)], transport=fake_transport()) == 0
@@ -243,11 +285,16 @@ def test_offline_classify_and_duplicates(tmp_path, capsys, fake_transport):
 
 def test_gate_scaffold_preview_then_apply(tmp_path, capsys, fake_transport):
     dest = tmp_path / "target"
-    assert cli.main(["--json", "gate-scaffold", "--dest", str(dest), "--namespace", "acme"], transport=fake_transport()) == 0
+    assert (
+        cli.main(["--json", "gate-scaffold", "--dest", str(dest), "--namespace", "acme"], transport=fake_transport())
+        == 0
+    )
     assert not dest.exists()  # preview wrote nothing
     capsys.readouterr()
-    assert cli.main(["gate-scaffold", "--dest", str(dest), "--namespace", "acme", "--apply"],
-                    transport=fake_transport()) == 0
+    assert (
+        cli.main(["gate-scaffold", "--dest", str(dest), "--namespace", "acme", "--apply"], transport=fake_transport())
+        == 0
+    )
     workflow = (dest / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
     assert "types: [acme-review-gate]" in workflow and "__GATE_NAMESPACE__" not in workflow
     assert (dest / ".github/review-gate/review_gate.py").is_file()

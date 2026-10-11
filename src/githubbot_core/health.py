@@ -278,9 +278,7 @@ class RepoHealthCollector:
         return datetime.now(timezone.utc)
 
     def _fetch_dependabot_alerts(self, repo: str) -> tuple[list[DependabotAlert], Optional[str]]:
-        data, error = self._call_paginated(
-            f"repos/{repo}/dependabot/alerts?state=open&per_page=100"
-        )
+        data, error = self._call_paginated(f"repos/{repo}/dependabot/alerts?state=open&per_page=100")
         if error:
             return [], f"{repo}: Dependabot-Warnungen konnten nicht geladen werden ({error})"
 
@@ -296,12 +294,9 @@ class RepoHealthCollector:
                     number=item.get("number", 0),
                     package_name=package.get("name", ""),
                     ecosystem=package.get("ecosystem", ""),
-                    severity=vulnerability.get("severity")
-                    or advisory.get("severity")
-                    or "unknown",
+                    severity=vulnerability.get("severity") or advisory.get("severity") or "unknown",
                     summary=advisory.get("summary", ""),
-                    manifest_path=item.get("manifest_path")
-                    or dependency.get("manifest_path", ""),
+                    manifest_path=item.get("manifest_path") or dependency.get("manifest_path", ""),
                     created_at=item.get("created_at", ""),
                     html_url=item.get("html_url", ""),
                 )
@@ -353,9 +348,7 @@ class RepoHealthCollector:
             None,
         )
 
-    def _fetch_code_scanning_alerts(
-        self, repo: str
-    ) -> tuple[list[CodeScanningAlert], int, Optional[str]]:
+    def _fetch_code_scanning_alerts(self, repo: str) -> tuple[list[CodeScanningAlert], int, Optional[str]]:
         data, error = self._call_paginated(f"repos/{repo}/code-scanning/alerts?state=open&per_page=100")
         if error:
             if self._is_optional_security_feature_unavailable(error):
@@ -390,9 +383,7 @@ class RepoHealthCollector:
 
         return visible_alerts, len(alerts), None
 
-    def _fetch_secret_scanning_alerts(
-        self, repo: str
-    ) -> tuple[list[SecretScanningAlert], int, Optional[str]]:
+    def _fetch_secret_scanning_alerts(self, repo: str) -> tuple[list[SecretScanningAlert], int, Optional[str]]:
         data, error = self._call_paginated(f"repos/{repo}/secret-scanning/alerts?state=open&per_page=100")
         if error:
             if self._is_optional_security_feature_unavailable(error):
@@ -433,9 +424,7 @@ class RepoHealthCollector:
     # Conclusions, die als echte Bruchstelle zaehlen (cancelled = bewusst abgebrochen, kein Defekt)
     FAILURE_CONCLUSIONS = ("failure", "timed_out", "startup_failure")
 
-    def _fetch_failed_runs(
-        self, repo: str
-    ) -> tuple[list[WorkflowFailure], int, int, Optional[str]]:
+    def _fetch_failed_runs(self, repo: str) -> tuple[list[WorkflowFailure], int, int, Optional[str]]:
         """Liefert nur OFFENE Fehllaeufe (Workflow+Branch aktuell rot) + Anzahl seither behobener.
 
         „since-resolved": Ein Fehllauf wird unterdrueckt, wenn fuer denselben Workflow
@@ -464,9 +453,7 @@ class RepoHealthCollector:
                 latest_completed[key] = item
 
         latest_open_ids = {
-            item.get("id")
-            for item in latest_completed.values()
-            if item.get("conclusion") in self.FAILURE_CONCLUSIONS
+            item.get("id") for item in latest_completed.values() if item.get("conclusion") in self.FAILURE_CONCLUSIONS
         }
 
         open_failures: list[WorkflowFailure] = []
@@ -481,7 +468,10 @@ class RepoHealthCollector:
             # Fehllauf im Fenster: offen nur, wenn er der juengste abgeschlossene Lauf seiner
             # (Workflow, Branch)-Gruppe ist; sonst seither behoben/ueberholt -> unterdruecken.
             if item.get("id") in latest_open_ids:
-                if item.get("event") in {"pull_request", "pull_request_target"} and not self._has_open_pull_request_for_run(repo, item):
+                if item.get("event") in {
+                    "pull_request",
+                    "pull_request_target",
+                } and not self._has_open_pull_request_for_run(repo, item):
                     closed_pr_count += 1
                     continue
                 open_failures.append(
@@ -515,7 +505,7 @@ class RepoHealthCollector:
         branch = run.get("head_branch", "")
         if not branch:
             return True
-        head_repo = ((run.get("head_repository") or {}).get("full_name") or repo)
+        head_repo = (run.get("head_repository") or {}).get("full_name") or repo
         head_owner = head_repo.split("/", 1)[0]
         head = quote(f"{head_owner}:{branch}", safe="")
         data, error = self._call(f"repos/{repo}/pulls?state=open&head={head}&per_page=1")
@@ -551,10 +541,7 @@ def generate_health_report(
     with_code_scanning = [s for s in summaries if s.code_scanning_alerts]
     with_secret_scanning = [s for s in summaries if s.secret_scanning_alerts]
     with_copilot_autofix = [s for s in summaries if s.copilot_autofix_count]
-    with_missing_metadata = [
-        s for s in summaries
-        if not s.is_locked and (s.missing_description or s.missing_topics)
-    ]
+    with_missing_metadata = [s for s in summaries if not s.is_locked and (s.missing_description or s.missing_topics)]
     with_errors = [s for s in summaries if s.errors]
     healthy = [s for s in summaries if not s.errors and not s.has_findings()]
 
@@ -583,7 +570,7 @@ def generate_health_report(
         f"**Copilot-Autofix-Signale:** {total_copilot_autofix} in {len(with_copilot_autofix)} Repos",
         f"**Repos mit fehlenden Metadaten:** {len(with_missing_metadata)} in {len(summaries)} Repos (ohne gelockte Repos)",
         "",
-        f"*„Offen\" = der jüngste abgeschlossene Lauf je Workflow+Branch ist rot. Fehlläufe, die ein "
+        f'*„Offen" = der jüngste abgeschlossene Lauf je Workflow+Branch ist rot. Fehlläufe, die ein '
         f"späterer Lauf wieder grün gemacht hat, werden nur gezählt, nicht gelistet. "
         f"Pro Repo max. {max_dependabot_alerts_per_repo} Dependabot-Warnungen / "
         f"{max_failed_runs_per_repo} offene Läufe / "
@@ -614,11 +601,7 @@ def generate_health_report(
         lines.append("### Repos mit OFFENEN fehlgeschlagenen Actions-Läufen (aktuell rot)")
         lines.append("")
         for summary in sorted(with_failures, key=lambda item: (-item.failed_runs_count, item.repo)):
-            resolved_note = (
-                f" (+{summary.resolved_failures} seither behoben)"
-                if summary.resolved_failures
-                else ""
-            )
+            resolved_note = f" (+{summary.resolved_failures} seither behoben)" if summary.resolved_failures else ""
             lines.append(f"**{summary.repo}** -- {summary.failed_runs_count} offen{resolved_note}")
             for run in summary.failed_runs:
                 workflow_name = run.workflow_name or "Unbenannter Workflow"

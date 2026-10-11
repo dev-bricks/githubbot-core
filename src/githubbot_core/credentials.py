@@ -53,7 +53,11 @@ class GhCliTokenProvider:
         try:
             result = run(
                 [self.gh, "auth", "token"],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
             )
         except (OSError, subprocess.TimeoutExpired):
             return None

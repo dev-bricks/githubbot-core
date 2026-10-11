@@ -86,8 +86,14 @@ def list_plugins() -> list[dict]:
         try:
             plugin = _instantiate(name, loader)
             info = dict(plugin.describe())
-            result.append({"name": name, "available": True, **info,
-                           "hooks": [h for h in ("plan", "pr_policy_checks") if callable(getattr(plugin, h, None))]})
+            result.append(
+                {
+                    "name": name,
+                    "available": True,
+                    **info,
+                    "hooks": [h for h in ("plan", "pr_policy_checks") if callable(getattr(plugin, h, None))],
+                }
+            )
         except PluginNotAvailable as exc:
             result.append({"name": name, "available": False, "error": str(exc)})
     return result

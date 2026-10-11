@@ -1,5 +1,7 @@
 # githubbot-core
 
+<p align="center"><img src="assets/banner.png" width="100%" alt="githubbot-core banner"></p>
+
 **English** | [Deutsch](README_de.md)
 
 Neutral, installable core for GitHub repository maintenance: issue triage, duplicate detection,
@@ -128,6 +130,7 @@ my-extension = "my_extension:create"
 from githubbot_core.actions import Action
 from githubbot_core.plugins import SPI_VERSION
 
+
 class MyExtension:
     name = "my-extension"
     spi_version = SPI_VERSION
@@ -135,13 +138,13 @@ class MyExtension:
     def describe(self):
         return {"version": "1.0.0", "capabilities": ["plan"]}
 
-    def plan(self, ctx):                      # ctx.config, ctx.transport (read-only), ctx.args
+    def plan(self, ctx):  # ctx.config, ctx.transport (read-only), ctx.args
         data, error = ctx.transport.get("repos/owner/repo")
-        return [Action("api.request", {"method": "PUT", "endpoint": "user/starred/owner/repo"},
-                       reason="example")]
+        return [Action("api.request", {"method": "PUT", "endpoint": "user/starred/owner/repo"}, reason="example")]
 
-    def pr_policy_checks(self, pr, files, diff):   # optional
+    def pr_policy_checks(self, pr, files, diff):  # optional
         return [("no_large_binaries", True, "OK")]
+
 
 def create():
     return MyExtension()
@@ -164,6 +167,7 @@ trust boundaries and rollback: [docs/REVIEW_GATE.md](docs/REVIEW_GATE.md).
 pip install -e ".[dev]"
 python -m pytest            # unit and contract tests
 ruff check .
+ruff format --check .
 GITHUBBOT_CORE_CONSUMER_TEST=1 python -m pytest tests/test_consumer_install.py   # fresh-venv install test
 ```
 

@@ -6,6 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 
 ## [Unreleased]
 
+### Geändert / Changed
+
+- Gesamter Baum mit `ruff format` formatiert (keine Codeänderung, AST identisch); CI prüft jetzt
+  zusätzlich `ruff format --check` / whole tree formatted with `ruff format` (no code change, AST
+  identical); CI now also runs `ruff format --check`.
+- README (EN/DE) mit Banner (`assets/banner.png`, Quelle `assets/banner.svg`); Testkommentar
+  neutral formuliert / README banner added; a test comment worded neutrally.
+
 ## [0.2.1] - 2026-10-11
 
 ### Geändert / Changed
