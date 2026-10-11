@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-11
+
+### Geändert / Changed
+
+- `system-agent`: `sha256` bezieht sich auf schema+id+blueprint und ist für Konsumenten nachrechenbar /
+  sha256 scope: schema+id+blueprint, verifiable by consumers (canonical JSON, sorted keys, compact
+  separators, UTF-8, `ensure_ascii=False`; excludes version, capability, permissions, `_meta`).
+  The hash value of the unchanged v0.2.0 blueprint changes from the old whole-file hash.
+
 ## [0.2.0] - 2026-10-11
 
 ### Hinzugefügt / Added
