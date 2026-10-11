@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "githubbot-core"
+dynamic = ["version"]
+description = "Neutral GitHub maintenance core: triage, reports, preview/apply actions, plugin SPI and exact-SHA review receipts"
+authors = [{ name = "Lukas Geiger" }]
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+dependencies = []
+keywords = ["github", "automation", "triage", "pr-review", "duplicate-detection", "review-gate", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Bug Tracking",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.scripts]
+githubbot-core = "githubbot_core.cli:main"
+
+[project.urls]
+Repository = "https://github.com/dev-bricks/githubbot-core"
+Issues = "https://github.com/dev-bricks/githubbot-core/issues"
+Changelog = "https://github.com/dev-bricks/githubbot-core/blob/main/CHANGELOG.md"
+Security = "https://github.com/dev-bricks/githubbot-core/blob/main/SECURITY.md"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "ruff>=0.5.0"]
+
+[tool.setuptools.dynamic]
+version = { attr = "githubbot_core.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+githubbot_core = ["default_config.json", "templates/*.yml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E402", "E501", "E741"]
