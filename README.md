@@ -185,13 +185,12 @@ No third-party code is included; see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICEN
 ## Optional MULTI-BOT role
 
 `python -m githubbot_core multi-bot` delegates mode/provider/model/effort selection to the
-optional TASKPLAN launcher. Modes: `triage` (one shot), `review-merge` (independent reviews),
-`aftercare` (reviews plus conservative care). Missing TASKPLAN produces an installation hint
+optional TASKPLAN launcher. The visible menu is **1 operator** (default), **2 bot-triage** (PR triage/reviews only), and **3 github-maintain** (fixes and maintenance). Operator checks fresh PR work before every unit, then fixes, then policies/gates/privacy and care. Initial policy preference and evidenced policy/care alternation are a documented heuristic; urgent policies precede routine care. Missing TASKPLAN produces an installation hint
 and starts no provider. `--dry-run` enables TASKPLAN's no-probe dry run.
 
 Wheels and sdists ship `githubbot_core/prompts/MULTI-BOT.de.md`, neutral starters under
 `githubbot_core/starters/windows` and `starters/posix`, and the care/probe helper modules.
-`githubbot-core --json multi-bot-role --mode triage|review-merge|aftercare` exports one
+`githubbot-core --json multi-bot-role --mode operator` exports one
 role using the existing strict descriptor schema. `system-agent` remains unchanged;
 role definitions live in the separate packaged `multibot_roles.json` resource. Runtime root defaults to the current directory. Merge is
 disabled and full access is not forced by public defaults. Explicit `--config` layers may
@@ -203,3 +202,9 @@ host roots belong to private instance configuration. `multi-bot-care --root PATH
 and `multi-bot-probe --root PATH` require explicit registry/org/host-log data and fail
 closed when absent. Private runtime/extensions remain separate consumers; no background
 service or executable automatic merge is installed.
+
+Named legacy flags `triage`, `review-merge`, and `aftercare` retain their original limited behavior and are absent from the new three-choice menu. Choosing a role never enables merges or widens permissions.
+
+`githubbot-core --json multi-bot-select --input SNAPSHOT.json --mode operator` makes a deterministic read-only decision from an existing snapshot. It creates no queue, work item, persistent state, or agent. The snapshot contains `candidates`, optional `processed` and `lastMaintenance`. Candidates require `id`, an exact lowercase 40-character commit `revision`, `status` (`ready`, `blocked`, `done`), `category` (`prs`, `fixes`, `policies`, `care`), and optional boolean `urgent`. Processed records carry the same identity/category, blocked/done status and a nonempty `evidence` reference; the caller verifies the actual evidence. `lastMaintenance` points via `{id, revision}` to an evidenced successful policy/care completion. Selection and repeated empty checks never advance it. Unknown values are rejected. Exact processed heads are skipped; changed PR heads can preempt fixes and maintenance. Equal-priority candidates sort by ID and SHA.
+
+The neutral ASCII Windows starter is titled MULTI-BOT COMPANION, explains foreground operation and pauses after success, failure or STOP. Only explicit `--dry-run`, `TASKPLAN_STARTER_DRY_RUN=1` or `MULTIBOT_NO_PAUSE=1` skips the pause. It installs nothing and opens no extra window.

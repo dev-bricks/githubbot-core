@@ -13,7 +13,9 @@ import tempfile
 
 from .config import ConfigError, load_config
 
-MODES = ("triage", "review-merge", "aftercare")
+MODES = ("operator", "bot-triage", "github-maintain")
+LEGACY_MODES = ("triage", "review-merge", "aftercare")
+ALL_MODES = MODES + LEGACY_MODES
 
 
 def packaged_role(mode, *, package=None):
@@ -50,7 +52,7 @@ def choose_mode(value="", *, ask=input, chooser=None):
     if value in ("1", "2", "3"):
         value = MODES[int(value) - 1]
     if value:
-        if value not in MODES:
+        if value not in ALL_MODES:
             raise ValueError(f"Unknown mode: {value}")
         return value
     if chooser is None:
@@ -102,7 +104,7 @@ def main(argv=None, *, launch=None):
             env["TASKPLAN_STARTER_PROBE"] = "0"
         if launch is None:
             from taskplan.launcher import launch
-        mode = choose_mode(args.mode or settings.get("mode", "") or ("triage" if args.no_interactive else ""))
+        mode = choose_mode(args.mode or settings.get("mode", "") or ("operator" if args.no_interactive else ""))
         request = f"Start MULTI-BOT in mode {mode}. Read the complete packaged role prompt."
         request += " Configured merge account: " + (str(settings.get("merge_account", "")) or "none") + "."
         request += " Merge enabled: " + str(settings.get("merge_enabled") is True).lower() + "."

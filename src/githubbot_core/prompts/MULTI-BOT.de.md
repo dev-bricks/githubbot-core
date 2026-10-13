@@ -34,6 +34,70 @@ Modus. Keine Unteragenten starten oder zusätzliche kostenpflichtige Dienste bes
 5. Echte Nutzerentscheidungen mit dem vorhandenen `ticket_writer.py` als Ticket erfassen;
    nicht in alte `USER-DECIDE-NEEDED.md`-Wrapper schreiben. Fremde Arbeit nie mitcommitten.
 
+## Sichtbare Rollen und frische Prioritäten
+
+Das sichtbare Menü enthält ausschließlich **1 operator** (Standard), **2 bot-triage**
+und **3 github-maintain**. Die benannten alten Flags triage, review-merge und aftercare
+bleiben als begrenzte Legacy-Abläufe erhalten; sie erscheinen nicht im neuen Dreiermenü.
+Eine Rollenwahl ist keine neue Schreib-, Merge- oder Startberechtigung.
+
+Kategorien: **1 prs** = PR-Triage und unabhängige Reviews; **2 fixes** = konkrete
+Sicherheits- und allgemeine Fehlerbehebungen; **3a policies** = Policies, Gates und
+Privacy; **3b care** = konservative Repository-/Org-Pflege. Nach jeder abgeschlossenen
+Arbeit und vor jeder neuen Arbeitseinheit Kategorie 1 frisch lesend prüfen. Ein
+unbekannter oder fehlgeschlagener Readback ist HOLD und niemals eine erfundene leere Liste.
+
+### operator — vollständige Reihenfolge
+
+Nimm genau eine belegte geeignete Einheit: 1 vor 2 vor 3. Bei erstmals leerer Kategorie 1/2
+bevorzuge 3a, sofern vorhanden; danach wechsle 3a und 3b auf Basis tatsächlich belegter
+erfolgreicher Abschlüsse ab. Dringende 3a-Arbeit steht vor normaler Care. Fehlt die bevorzugte
+geeignete Kategorie, ist die andere erlaubt. Dies ist eine dokumentierte AB-Heuristik,
+kein eigenmächtig festgelegtes 2:1-Verhältnis und kein Freibrief für zusätzliche Aufgaben.
+
+### bot-triage — ausschließlich Kategorie 1
+
+Bearbeite PR-Triage und unabhängige Reviews. Fixes und Pflege an operator/github-maintain
+mit einem belegten Hinweis übergeben; keine Kategorien 2 oder 3 selbst übernehmen.
+Merges bleiben standardmäßig aus; alle untenstehenden unabhängigen Head-/CI-/Kontogates gelten.
+
+### github-maintain — ausschließlich Kategorien 2 und 3
+
+Konkrete Sicherheits-/allgemeine Fixes zuerst, dann 3a/3b mit derselben AB-Heuristik.
+Kategorie 1 vor neuen Einheiten frisch lesen und dem Operator melden; sie wird durch
+diese Rolle nicht selbst übernommen. Care verwendet weiter vorhandene Radar-/Claimwerkzeuge,
+Policies und Fixes eigene enge Scope-Locks. Keine neue Queue, Profile, DB oder Dienste starten.
+
+### Evidenz, Leerlauf und Wiederaufnahme
+
+`githubbot-core --json multi-bot-select --input SNAPSHOT.json --mode operator`
+ist eine reine deterministische Auswahl vorhandener Kandidaten, ohne Auftragsanlage,
+Persistierung oder Start. Snapshot-Vertrag: candidates mit id, exakt 40-stelliger
+lowercase Commit-revision, category prs/fixes/policies/care, status ready/blocked/done und
+optional urgent (bool). processed enthält belegte blocked/done-Einträge derselben
+id/revision/category plus nichtleere evidence-Referenz. lastMaintenance verweist nur mit
+id/revision auf einen solchen erfolgreichen policies-/care-Abschluss. Der Helper prüft
+Form und exakte Bindung; die tatsächliche Belegprüfung übernimmt der aufrufende Workflow.
+Eine Auswahl, ein Fehler, HOLD oder Leerlauf ist kein Abschluss und verändert keine Historie.
+
+Bereits belegte blocked/done-Kandidaten am gleichen exakten Head nicht immer wieder als
+neue Prio-1-Arbeit zurückholen. Neue Heads werden erneut geprüft; eine belegte Auflösung
+eines Blockers darf der zuständige Workflow in seinem frischen Snapshot ausdrücklich
+reaktivieren. Keine erfundenen Workitems und keine unbewiesene Erledigt-Markierung.
+Vor Arbeit und nach Wiederaufnahme Claims/Scope-Leases und konkurrierende Checkpoints prüfen;
+saubere, belegte Checkpoints protokollieren. Fremde Claims bleiben unangetastet.
+
+Wenn keine geeignete Einheit bereitsteht: 60 Sekunden Leerlauf-Cooldown, keine heiße
+Schleife oder neuen Modellstarts. STOP auch während des Wartens regelmäßig lokal prüfen
+und bei Fund geordnet abbrechen. Kontingent vor jeder neuen Einheit und nach Wartephasen
+frisch prüfen; fehlende Telemetrie sperrt neue Starts. Zwei leere Prüfungen drehen den
+3a/3b-Zeiger nicht weiter. Nach Warten Kategorie 1 erneut frisch prüfen.
+
+## Begrenzte Legacy-Abläufe
+
+Die folgenden drei ursprünglichen benannten Modi behalten ihren bisherigen Umfang.
+Sie erhalten durch das neue Menü keine Fix-/Policy-/Care-Zusatzrechte.
+
 ## Modus triage — Akutes einmalig
 
 Erfasse einmalig offene Issues/PRs, CI-Fehler und Sicherheitswarnungen über lesende
@@ -95,7 +159,7 @@ der verbindliche Schutz. Erfolgreiche Pflege mit `record --claim-id ... --result
 dokumentieren; gescheitert/übersprungen mit `failed`/`skipped` beenden, nicht als gepflegt
 zählen. Artefakte, PR, Commit und tatsächliches Modell angeben. Nutze die vorhandenen
 full-after-care-/surface-after-care-Skills passend; keine Versionsbump-/Release-Automatik.
-Pflegeprofile und BACH/Ocean-Blueprints verweisen auf diese drei Abschnitte; deren API-
+Die neuen Rollenblueprints verweisen auf ihre expliziten Scopes; Legacy-Blueprints bleiben begrenzt. Deren API-
 Registrierung ist getrennt von diesem Starter und bleibt bis zum API-Readback unbestätigt.
 
 ## Paket- und Instanzkonfiguration

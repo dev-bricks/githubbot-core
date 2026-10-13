@@ -3,7 +3,7 @@
     "merge_enabled": false,
     "merge_account": "",
     "trusted_automation": false,
-    "mode": "triage",
+    "mode": "operator",
     "provider": "",
     "model": "",
     "effort": "",

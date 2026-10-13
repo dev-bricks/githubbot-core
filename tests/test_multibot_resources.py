@@ -17,8 +17,8 @@ def test_system_agent_extends_compatible_template_with_verified_roles(capsys):
     descriptor_fields = {"schema", "id", "version", "sha256", "capability", "blueprint", "permissions"}
     assert set(data) == descriptor_fields
     resource = json.loads(resources.files("githubbot_core").joinpath("multibot_roles.json").read_text(encoding="utf-8"))
-    assert [r["mode"] for r in resource["roles"]] == list(multibot.MODES)
-    for mode in multibot.MODES:
+    assert [r["mode"] for r in resource["roles"]] == list(multibot.ALL_MODES)
+    for mode in multibot.ALL_MODES:
         assert cli.main(["--json", "multi-bot-role", "--mode", mode]) == 0
         role = json.loads(capsys.readouterr().out)["data"]
         assert set(role) == descriptor_fields
@@ -110,7 +110,7 @@ def test_actual_policy_mutation_changes_all_role_hashes(tmp_path, capsys):
     def role_hashes():
         result = {}
         with patch.object(cli.resources, "files", return_value=tmp_path):
-            for mode in multibot.MODES:
+            for mode in multibot.ALL_MODES:
                 cli.cmd_multibot_role(SimpleNamespace(mode=mode, json=True), config, None)
                 result[mode] = json.loads(capsys.readouterr().out)["data"]["sha256"]
         return result
@@ -118,7 +118,7 @@ def test_actual_policy_mutation_changes_all_role_hashes(tmp_path, capsys):
     before = role_hashes()
     policy.write_bytes(policy.read_bytes() + b"\nActual changed safety policy.\n")
     after = role_hashes()
-    assert all(before[mode] != after[mode] for mode in multibot.MODES)
+    assert all(before[mode] != after[mode] for mode in multibot.ALL_MODES)
 
 
 def test_launched_persona_is_exactly_the_hashed_descriptor(tmp_path, capsys):

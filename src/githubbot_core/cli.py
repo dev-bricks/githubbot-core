@@ -179,6 +179,16 @@ def cmd_multibot_role(args, config, transport) -> int:
     return EXIT_OK
 
 
+def cmd_multibot_select(args, config, transport) -> int:
+    """Choose from an existing offline snapshot; never enqueue, persist or execute work."""
+    from .multibot_select import select_work
+
+    snapshot = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    data = select_work(snapshot, mode=args.mode)
+    _emit(args, "multi-bot-select", True, "read", data, [], data["reason"])
+    return EXIT_OK
+
+
 def cmd_classify(args, config, transport) -> int:
     classifier = IssueClassifier(config)
     results = [classifier.classify(issue) for issue in _read_issues(Path(args.input))]
@@ -360,8 +370,13 @@ def build_parser() -> argparse.ArgumentParser:
         func=cmd_system_agent
     )
     p = sub.add_parser("multi-bot-role", help="one MULTI-BOT role as a compatible system-agent descriptor")
-    p.add_argument("--mode", default="triage")
+    p.add_argument("--mode", default="operator")
     p.set_defaults(func=cmd_multibot_role)
+
+    p = sub.add_parser("multi-bot-select", help="read-only deterministic selection from an existing snapshot")
+    p.add_argument("--input", required=True)
+    p.add_argument("--mode", default="operator", choices=("operator", "bot-triage", "github-maintain"))
+    p.set_defaults(func=cmd_multibot_select)
 
     p = sub.add_parser("classify", help="classify issues from a JSON file (offline)")
     p.add_argument("--input", required=True)

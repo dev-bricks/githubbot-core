@@ -1,4 +1,5 @@
 @echo off
 setlocal
-python -m githubbot_core multi-bot --provider claude --no-interactive %*
+REM Delegate githubbot_core multi-bot through the neutral foreground companion.
+call "%~dp0..\MULTI-BOT.bat" --provider claude --no-interactive %*
 exit /b %ERRORLEVEL%
