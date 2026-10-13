@@ -1,0 +1,13 @@
+{
+  "multi_bot": {
+    "merge_enabled": false,
+    "merge_account": "",
+    "trusted_automation": false,
+    "mode": "triage",
+    "provider": "",
+    "model": "",
+    "effort": "",
+    "root": "",
+    "instance_prompt": ""
+  }
+}

@@ -48,6 +48,23 @@ def test_installed_package_cli_without_private_extension(tmp_path: Path) -> None
     agent = _run([str(cli), "--json", "system-agent"], cwd=work)  # template ships as package data
     assert agent.returncode == 0, agent.stderr
     assert json.loads(agent.stdout)["data"]["blueprint"]["name"] == "githubbot"
+    assert len(json.loads(agent.stdout)["data"]["roles"]) == 3
+    role = _run([str(cli), "multi-bot", "--no-interactive", "--dry-run"], cwd=work)
+    assert role.returncode == 1 and "pip install taskplan" in role.stderr
+    assert not list(work.iterdir())  # no private data or provider process created
+    resource = _run(
+        [
+            str(python),
+            "-c",
+            "from importlib import resources; "
+            "p=resources.files('githubbot_core'); "
+            "assert p.joinpath('prompts/MULTI-BOT.de.md').is_file(); "
+            "assert p.joinpath('starters/windows/MULTI-BOT.bat').is_file(); "
+            "assert p.joinpath('starters/posix/start-multi-bot.sh').is_file()",
+        ],
+        cwd=work,
+    )
+    assert resource.returncode == 0, resource.stderr
 
     origin = _run([str(python), "-c", "import githubbot_core, sys; print(githubbot_core.__file__)"], cwd=work)
     assert "site-packages" in origin.stdout, origin.stdout  # not the source tree

@@ -47,3 +47,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 - Credential-Adapter (Umgebung, `gh auth token`) mit Schwärzung / credential adapter with redaction.
 - Namensraumunabhängiges Exact-SHA-Review-Gate samt Workflow-Scaffold /
   namespace-independent exact-SHA review gate with workflow scaffold.
+
+
+## Unreleased
+
+- Ship neutral MULTI-BOT Windows/POSIX starters, German prompt and runtime helpers in wheel/sdist.
+- Extend the existing system-agent contract with three hashed roles without changing its main blueprint.
+- Delegate optional provider launching to TASKPLAN; missing dependency fails closed with an install hint.
+- Keep roots, accounts, authentication and full-access settings in explicit private instance configuration.

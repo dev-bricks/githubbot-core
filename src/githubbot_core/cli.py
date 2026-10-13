@@ -146,6 +146,13 @@ def template_sha256(schema: str, template_id: str, blueprint: dict) -> str:
 def cmd_system_agent(args, config, transport) -> int:
     template = json.loads(resources.files("githubbot_core").joinpath("system_agent.json").read_text(encoding="utf-8"))
     schema = template["_meta"]["schema"]
+    roles = []
+    for raw in template.get("roles", []):
+        role = dict(raw)
+        role["sha256"] = template_sha256(schema, role["id"], role["blueprint"])
+        prompt = resources.files("githubbot_core").joinpath("prompts/MULTI-BOT.de.md").read_bytes()
+        role["prompt_sha256"] = hashlib.sha256(prompt).hexdigest()
+        roles.append(role)
     data = {
         "schema": schema,
         "id": template["id"],
@@ -154,6 +161,7 @@ def cmd_system_agent(args, config, transport) -> int:
         "capability": {"package": "githubbot-core", "version": __version__, "spi_version": plugins.SPI_VERSION},
         "blueprint": template["blueprint"],
         "permissions": config.get("permissions", {}),
+        "roles": roles,
     }
     text = f"system agent {data['id']} {data['version']} sha256 {data['sha256']}"
     _emit(args, "system-agent", True, "read", data, [], text)
@@ -390,6 +398,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_gate_scaffold)
 
     sub.add_parser("review-gate", help="signed exact-SHA receipts (see: review-gate --help)", add_help=False)
+    for name in ("multi-bot", "multi-bot-care", "multi-bot-probe"):
+        sub.add_parser(name, help="packaged MULTI-BOT role and runtime helpers", add_help=False)
     return parser
 
 
@@ -408,6 +418,15 @@ def _subcommand_index(argv: list[str]) -> Optional[int]:
 def main(argv: Optional[list[str]] = None, transport=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     index = _subcommand_index(argv)
+    if index is not None and argv[index] in {"multi-bot", "multi-bot-care", "multi-bot-probe"}:
+        from . import multibot, multibot_care, multibot_probe
+
+        entry = {
+            "multi-bot": multibot.main,
+            "multi-bot-care": multibot_care.main,
+            "multi-bot-probe": multibot_probe.main,
+        }[argv[index]]
+        return entry(argv[:index] + argv[index + 1 :])
     if index is not None and argv[index] == "review-gate":
         from . import review_gate
 

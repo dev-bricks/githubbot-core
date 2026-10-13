@@ -180,3 +180,25 @@ No third-party code is included; see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICEN
 ## License
 
 [MIT](LICENSE)
+
+
+## Optional MULTI-BOT role
+
+`python -m githubbot_core multi-bot` delegates mode/provider/model/effort selection to the
+optional TASKPLAN launcher. Modes: `triage` (one shot), `review-merge` (independent reviews),
+`aftercare` (reviews plus conservative care). Missing TASKPLAN produces an installation hint
+and starts no provider. `--dry-run` enables TASKPLAN's no-probe dry run.
+
+Wheels and sdists ship `githubbot_core/prompts/MULTI-BOT.de.md`, neutral starters under
+`githubbot_core/starters/windows` and `starters/posix`, and the care/probe helper modules.
+`githubbot-core --json system-agent` adds three hashed roles while preserving the existing
+main blueprint/hash contract. Runtime root defaults to the current directory. Merge is
+disabled and full access is not forced by public defaults. Explicit `--config` layers may
+set `multi_bot.root`, `instance_prompt`, `merge_account`, `merge_enabled`, and
+`trusted_automation`. The configured action permission ceiling remains binding.
+
+The starter never searches hidden credential paths. Accounts, authentication, slots and
+host roots belong to private instance configuration. `multi-bot-care --root PATH next`
+and `multi-bot-probe --root PATH` require explicit registry/org/host-log data and fail
+closed when absent. Private runtime/extensions remain separate consumers; no background
+service or executable automatic merge is installed.

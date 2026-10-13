@@ -183,3 +183,35 @@ Historie aufgebaut. Es ist kein Fremdcode enthalten; siehe
 ## Lizenz
 
 [MIT](LICENSE)
+
+
+## MULTI-BOT als optionale Agentenrolle
+
+`python -m githubbot_core multi-bot` startet die paketierte Rolle über TASKPLAN. Modus 1
+(`triage`) erfasst Akutes einmalig, Modus 2 (`review-merge`) wiederholt unabhängige Reviews,
+Modus 3 (`aftercare`) ergänzt Pflege. Das Startcenter kann denselben CLI-Aufruf benutzen.
+`--provider`, `--model`, `--effort` und `--mode` wählen ausdrücklich; die Provider-Ausführung
+bleibt in TASKPLAN. Fehlt dieses optionale Modul, erscheint ein Installationshinweis und
+kein Anbieter startet. `--dry-run` aktiviert TASKPLANs Trockenlauf ohne Sonde.
+
+Wheel und sdist enthalten den deutschen Prompt, neutrale Windows-/POSIX-Starter und die
+Care-/Probe-Helfer. Ressourcen: `githubbot_core/prompts/MULTI-BOT.de.md`,
+`githubbot_core/starters/windows/MULTI-BOT.bat`, `starters/windows/providers/`,
+`starters/posix/start-multi-bot.sh`. Auf POSIX funktioniert `sh start-multi-bot.sh` auch
+bei verlorenem Ausführungsrecht. Systemprofil: `githubbot-core --json system-agent`
+exportiert zusätzlich drei Rollen mit Blueprint- und Prompt-Hash; der bisherige
+Standard-Blueprint bleibt kompatibel.
+
+Standardmäßig ist der Betriebsroot das aktuelle Verzeichnis, Merge deaktiviert und
+Vollzugriff nicht erzwungen. Explizite private Konfiguration: `multi_bot.root`,
+`instance_prompt`, `merge_account`, `merge_enabled`, optional `trusted_automation` in
+`--config DATEI`; `MULTIBOT_ROOT`/`MULTIBOT_INSTANCE_PROMPT` sind entsprechende Overrides.
+Der Starter lädt keine Tokens aus einem festen Credential-Ordner. Konten, Auth, Slots und
+Hostpfade gehören in die Instanz, niemals in die neutrale Vorlage. Core-Permissions können
+weiterhin nur eingeschränkt werden; der Rollenprompt erweitert die Aktionsrechte nicht.
+
+`githubbot-core multi-bot-care --root PFAD next` und `multi-bot-probe --root PFAD` lesen
+explizite Instanzdaten (`config/repo_registry.json`, `config/orgs.json`, Hostlogs). Ohne
+Daten melden sie HOLD. Claims ersetzen keine Projektsperren; keine ausführbare Merge-Automatik
+oder neue Hintergrundroutine wird installiert. Private Extensions und private Runtime
+bleiben eigenständige, getrennte Konsumenten.

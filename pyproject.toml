@@ -45,7 +45,8 @@ version = { attr = "githubbot_core.__version__" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-githubbot_core = ["default_config.json", "system_agent.json", "templates/*.yml"]
+githubbot_core = ["default_config.json", "system_agent.json", "multibot.example.json", "templates/*.yml", "prompts/*.md",
+                  "starters/windows/*.bat", "starters/windows/providers/*.bat", "starters/posix/*.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
