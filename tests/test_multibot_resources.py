@@ -3,9 +3,11 @@
 from importlib import resources
 import json
 import sys
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from githubbot_core import cli, multibot
+from githubbot_core.config import load_config
 
 
 def test_system_agent_extends_compatible_template_with_verified_roles(capsys):
@@ -93,3 +95,97 @@ def test_missing_private_data_helpers_fail_without_writes(tmp_path, capsys):
     assert cli.main(["multi-bot-probe", "--root", str(tmp_path)]) == 1
     assert not list(tmp_path.iterdir())
     capsys.readouterr()
+
+
+def test_actual_policy_mutation_changes_all_role_hashes(tmp_path, capsys):
+    package = resources.files("githubbot_core")
+    (tmp_path / "prompts").mkdir()
+    (tmp_path / "multibot_roles.json").write_bytes(package.joinpath("multibot_roles.json").read_bytes())
+    policy = tmp_path / "prompts/MULTI-BOT.de.md"
+    policy.write_bytes(package.joinpath("prompts/MULTI-BOT.de.md").read_bytes())
+
+    # load_config needs the packaged default while the role fixture intentionally replaces only the role resources.
+    config = load_config()
+
+    def role_hashes():
+        result = {}
+        with patch.object(cli.resources, "files", return_value=tmp_path):
+            for mode in multibot.MODES:
+                cli.cmd_multibot_role(SimpleNamespace(mode=mode, json=True), config, None)
+                result[mode] = json.loads(capsys.readouterr().out)["data"]["sha256"]
+        return result
+
+    before = role_hashes()
+    policy.write_bytes(policy.read_bytes() + b"\nActual changed safety policy.\n")
+    after = role_hashes()
+    assert all(before[mode] != after[mode] for mode in multibot.MODES)
+
+
+def test_launched_persona_is_exactly_the_hashed_descriptor(tmp_path, capsys):
+    cli.main(["--json", "multi-bot-role", "--mode", "aftercare"])
+    descriptor = json.loads(capsys.readouterr().out)["data"]
+
+    def launch(_role, **kwargs):
+        from pathlib import Path
+
+        assert Path(kwargs["prompt_file"]).read_text(encoding="utf-8") == descriptor["blueprint"]["persona_prompt"]
+        assert descriptor["sha256"] in kwargs["request"]
+        return 0
+
+    assert multibot.main(["--root", str(tmp_path), "--mode", "aftercare", "--no-interactive"], launch=launch) == 0
+
+
+def test_readonly_ceiling_and_config_layers_reach_the_run_contract(tmp_path):
+    path = tmp_path / "readonly.json"
+    path.write_text(
+        json.dumps(
+            {
+                "permissions": {"ceiling": [], "enabled": [], "api_write_prefixes": []},
+                "credentials": {"token": "must-not-copy-secret"},
+            }
+        )
+    )
+    default, readonly = Mock(return_value=0), Mock(return_value=0)
+    args = ["--root", str(tmp_path), "--mode", "aftercare", "--no-interactive"]
+    assert multibot.main(args, launch=default) == 0
+    assert multibot.main(["--config", str(path), *args], launch=readonly) == 0
+    request = readonly.call_args.kwargs["request"]
+    assert request != default.call_args.kwargs["request"] and str(path.resolve()) in request
+    contract = json.loads(
+        request.split("AUTHORITATIVE CORE RUN CONTRACT (not credentials):\n")[1].split("\nPreserve config_layers")[0]
+    )
+    assert contract == {
+        "permissions": {"ceiling": [], "enabled": [], "api_write_prefixes": []},
+        "config_layers": [str(path.resolve())],
+    }
+    assert "must-not-copy-secret" not in request and "unknown write authority means HOLD" in request
+
+
+def test_explicit_layer_order_is_preserved(tmp_path):
+    first, second = tmp_path / "first.json", tmp_path / "second.json"
+    first.write_text(json.dumps({"permissions": {"enabled": ["issue.comment"]}}))
+    second.write_text(json.dumps({"permissions": {"enabled": []}}))
+    launch = Mock(return_value=0)
+    assert (
+        multibot.main(
+            [
+                "--config",
+                str(first),
+                "--config",
+                str(second),
+                "--root",
+                str(tmp_path),
+                "--mode",
+                "triage",
+                "--no-interactive",
+            ],
+            launch=launch,
+        )
+        == 0
+    )
+    request = launch.call_args.kwargs["request"]
+    contract = json.loads(
+        request.split("AUTHORITATIVE CORE RUN CONTRACT (not credentials):\n")[1].split("\nPreserve config_layers")[0]
+    )
+    assert contract["config_layers"] == [str(first.resolve()), str(second.resolve())]
+    assert contract["permissions"]["enabled"] == []

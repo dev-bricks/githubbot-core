@@ -162,19 +162,17 @@ def cmd_system_agent(args, config, transport) -> int:
 
 def cmd_multibot_role(args, config, transport) -> int:
     """Export one role using exactly the existing system-agent descriptor shape."""
-    from .multibot import choose_mode
+    from .multibot import choose_mode, packaged_role
 
     mode = choose_mode(args.mode)
-    resource = json.loads(resources.files("githubbot_core").joinpath("multibot_roles.json").read_text(encoding="utf-8"))
-    role = next(r for r in resource["roles"] if r["mode"] == mode)
-    schema = resource["_meta"]["schema"]
+    schema, role_id, blueprint = packaged_role(mode, package=resources.files("githubbot_core"))
     data = {
         "schema": schema,
-        "id": role["id"],
+        "id": role_id,
         "version": __version__,
-        "sha256": template_sha256(schema, role["id"], role["blueprint"]),
+        "sha256": template_sha256(schema, role_id, blueprint),
         "capability": {"package": "githubbot-core", "version": __version__, "spi_version": plugins.SPI_VERSION},
-        "blueprint": role["blueprint"],
+        "blueprint": blueprint,
         "permissions": config.get("permissions", {}),
     }
     _emit(args, "multi-bot-role", True, "read", data, [], f"MULTI-BOT role {mode} sha256 {data['sha256']}")
