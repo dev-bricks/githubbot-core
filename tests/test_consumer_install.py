@@ -48,7 +48,10 @@ def test_installed_package_cli_without_private_extension(tmp_path: Path) -> None
     agent = _run([str(cli), "--json", "system-agent"], cwd=work)  # template ships as package data
     assert agent.returncode == 0, agent.stderr
     assert json.loads(agent.stdout)["data"]["blueprint"]["name"] == "githubbot"
-    assert len(json.loads(agent.stdout)["data"]["roles"]) == 3
+    assert "roles" not in json.loads(agent.stdout)["data"]
+    role_descriptor = _run([str(cli), "--json", "multi-bot-role", "--mode", "aftercare"], cwd=work)
+    assert role_descriptor.returncode == 0
+    assert json.loads(role_descriptor.stdout)["data"]["id"] == "multi-bot-aftercare"
     role = _run([str(cli), "multi-bot", "--no-interactive", "--dry-run"], cwd=work)
     assert role.returncode == 1 and "pip install taskplan" in role.stderr
     assert not list(work.iterdir())  # no private data or provider process created

@@ -52,6 +52,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 ## Unreleased
 
 - Ship neutral MULTI-BOT Windows/POSIX starters, German prompt and runtime helpers in wheel/sdist.
-- Extend the existing system-agent contract with three hashed roles without changing its main blueprint.
+- Export separate MULTI-BOT role descriptors using the strict existing schema; preserve system-agent unchanged.
 - Delegate optional provider launching to TASKPLAN; missing dependency fails closed with an install hint.
 - Keep roots, accounts, authentication and full-access settings in explicit private instance configuration.

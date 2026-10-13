@@ -1,0 +1,110 @@
+{
+  "_meta": {
+    "schema": "githubbot-core.system-agent/v1",
+    "description": "Separate MULTI-BOT role resources. Export one compatible descriptor with multi-bot-role --mode; the existing system-agent response is unchanged."
+  },
+  "roles": [
+    {
+      "id": "multi-bot-triage",
+      "label": "multi-bot",
+      "mode": "triage",
+      "command": [
+        "githubbot-core",
+        "multi-bot",
+        "--mode",
+        "triage"
+      ],
+      "prompt_resource": "githubbot_core:prompts/MULTI-BOT.de.md",
+      "blueprint": {
+        "name": "multi-bot-triage",
+        "title": "MULTI-BOT triage",
+        "kind": "agent",
+        "description": "Neutral GitHub maintenance role; instance capabilities and authorization remain explicit.",
+        "persona_role": "github-maintainer",
+        "persona_prompt": "Read the complete packaged githubbot_core resource prompts/MULTI-BOT.de.md. Start in mode triage. Runtime root, merge account and authorization come from explicit instance configuration. Merge is disabled by default. Never expand the configured permission ceiling.",
+        "skills": [],
+        "animus_type": "cli",
+        "modus": "casualis",
+        "contractus": {
+          "turns": 15,
+          "cooldown_seconds": 60
+        },
+        "governance": {
+          "profile": "read_only_research",
+          "tool_whitelist": [
+            "read_files",
+            "search_content"
+          ]
+        }
+      }
+    },
+    {
+      "id": "multi-bot-review-merge",
+      "label": "multi-bot",
+      "mode": "review-merge",
+      "command": [
+        "githubbot-core",
+        "multi-bot",
+        "--mode",
+        "review-merge"
+      ],
+      "prompt_resource": "githubbot_core:prompts/MULTI-BOT.de.md",
+      "blueprint": {
+        "name": "multi-bot-review-merge",
+        "title": "MULTI-BOT review-merge",
+        "kind": "agent",
+        "description": "Neutral GitHub maintenance role; instance capabilities and authorization remain explicit.",
+        "persona_role": "github-maintainer",
+        "persona_prompt": "Read the complete packaged githubbot_core resource prompts/MULTI-BOT.de.md. Start in mode review-merge. Runtime root, merge account and authorization come from explicit instance configuration. Merge is disabled by default. Never expand the configured permission ceiling.",
+        "skills": [],
+        "animus_type": "cli",
+        "modus": "usus",
+        "contractus": {
+          "turns": 15,
+          "cooldown_seconds": 60
+        },
+        "governance": {
+          "profile": "read_only_research",
+          "tool_whitelist": [
+            "read_files",
+            "search_content"
+          ]
+        }
+      }
+    },
+    {
+      "id": "multi-bot-aftercare",
+      "label": "multi-bot",
+      "mode": "aftercare",
+      "command": [
+        "githubbot-core",
+        "multi-bot",
+        "--mode",
+        "aftercare"
+      ],
+      "prompt_resource": "githubbot_core:prompts/MULTI-BOT.de.md",
+      "blueprint": {
+        "name": "multi-bot-aftercare",
+        "title": "MULTI-BOT aftercare",
+        "kind": "agent",
+        "description": "Neutral GitHub maintenance role; instance capabilities and authorization remain explicit.",
+        "persona_role": "github-maintainer",
+        "persona_prompt": "Read the complete packaged githubbot_core resource prompts/MULTI-BOT.de.md. Start in mode aftercare. Runtime root, merge account and authorization come from explicit instance configuration. Merge is disabled by default. Never expand the configured permission ceiling.",
+        "skills": [],
+        "animus_type": "cli",
+        "modus": "usus",
+        "contractus": {
+          "turns": 15,
+          "cooldown_seconds": 60
+        },
+        "governance": {
+          "profile": "read_only_research",
+          "tool_whitelist": [
+            "read_files",
+            "search_content"
+          ]
+        }
+      }
+    }
+  ]
+}

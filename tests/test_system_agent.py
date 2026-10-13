@@ -75,11 +75,6 @@ def test_hash_ignores_version_and_meta(capsys, monkeypatch, tmp_path):
     template = json.loads(resources.files("githubbot_core").joinpath("system_agent.json").read_text(encoding="utf-8"))
     template["_meta"]["description"] += " (changed)"
     (tmp_path / "system_agent.json").write_text(json.dumps(template), encoding="utf-8")
-    (tmp_path / "prompts").mkdir()
-    (tmp_path / "prompts/MULTI-BOT.de.md").write_text(
-        resources.files("githubbot_core").joinpath("prompts/MULTI-BOT.de.md").read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
     monkeypatch.setattr(cli, "resources", SimpleNamespace(files=lambda _package: tmp_path))
     monkeypatch.setattr(cli, "__version__", "9.9.9")
     data = _system_agent(capsys)

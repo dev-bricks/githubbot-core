@@ -191,8 +191,9 @@ and starts no provider. `--dry-run` enables TASKPLAN's no-probe dry run.
 
 Wheels and sdists ship `githubbot_core/prompts/MULTI-BOT.de.md`, neutral starters under
 `githubbot_core/starters/windows` and `starters/posix`, and the care/probe helper modules.
-`githubbot-core --json system-agent` adds three hashed roles while preserving the existing
-main blueprint/hash contract. Runtime root defaults to the current directory. Merge is
+`githubbot-core --json multi-bot-role --mode triage|review-merge|aftercare` exports one
+role using the existing strict descriptor schema. `system-agent` remains unchanged;
+role definitions live in the separate packaged `multibot_roles.json` resource. Runtime root defaults to the current directory. Merge is
 disabled and full access is not forced by public defaults. Explicit `--config` layers may
 set `multi_bot.root`, `instance_prompt`, `merge_account`, `merge_enabled`, and
 `trusted_automation`. The configured action permission ceiling remains binding.

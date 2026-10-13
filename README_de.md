@@ -198,9 +198,10 @@ Wheel und sdist enthalten den deutschen Prompt, neutrale Windows-/POSIX-Starter 
 Care-/Probe-Helfer. Ressourcen: `githubbot_core/prompts/MULTI-BOT.de.md`,
 `githubbot_core/starters/windows/MULTI-BOT.bat`, `starters/windows/providers/`,
 `starters/posix/start-multi-bot.sh`. Auf POSIX funktioniert `sh start-multi-bot.sh` auch
-bei verlorenem Ausführungsrecht. Systemprofil: `githubbot-core --json system-agent`
-exportiert zusätzlich drei Rollen mit Blueprint- und Prompt-Hash; der bisherige
-Standard-Blueprint bleibt kompatibel.
+bei verlorenem Ausführungsrecht. Systemprofil: `githubbot-core --json multi-bot-role --mode triage|review-merge|aftercare`
+exportiert jeweils einen Rollen-Descriptor im bestehenden strikten Schema. Der bisherige
+`system-agent`-Descriptor bleibt unverändert; die drei Rollen stehen separat in der
+Paketresource `multibot_roles.json`.
 
 Standardmäßig ist der Betriebsroot das aktuelle Verzeichnis, Merge deaktiviert und
 Vollzugriff nicht erzwungen. Explizite private Konfiguration: `multi_bot.root`,

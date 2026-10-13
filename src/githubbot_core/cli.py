@@ -146,13 +146,6 @@ def template_sha256(schema: str, template_id: str, blueprint: dict) -> str:
 def cmd_system_agent(args, config, transport) -> int:
     template = json.loads(resources.files("githubbot_core").joinpath("system_agent.json").read_text(encoding="utf-8"))
     schema = template["_meta"]["schema"]
-    roles = []
-    for raw in template.get("roles", []):
-        role = dict(raw)
-        role["sha256"] = template_sha256(schema, role["id"], role["blueprint"])
-        prompt = resources.files("githubbot_core").joinpath("prompts/MULTI-BOT.de.md").read_bytes()
-        role["prompt_sha256"] = hashlib.sha256(prompt).hexdigest()
-        roles.append(role)
     data = {
         "schema": schema,
         "id": template["id"],
@@ -161,10 +154,30 @@ def cmd_system_agent(args, config, transport) -> int:
         "capability": {"package": "githubbot-core", "version": __version__, "spi_version": plugins.SPI_VERSION},
         "blueprint": template["blueprint"],
         "permissions": config.get("permissions", {}),
-        "roles": roles,
     }
     text = f"system agent {data['id']} {data['version']} sha256 {data['sha256']}"
     _emit(args, "system-agent", True, "read", data, [], text)
+    return EXIT_OK
+
+
+def cmd_multibot_role(args, config, transport) -> int:
+    """Export one role using exactly the existing system-agent descriptor shape."""
+    from .multibot import choose_mode
+
+    mode = choose_mode(args.mode)
+    resource = json.loads(resources.files("githubbot_core").joinpath("multibot_roles.json").read_text(encoding="utf-8"))
+    role = next(r for r in resource["roles"] if r["mode"] == mode)
+    schema = resource["_meta"]["schema"]
+    data = {
+        "schema": schema,
+        "id": role["id"],
+        "version": __version__,
+        "sha256": template_sha256(schema, role["id"], role["blueprint"]),
+        "capability": {"package": "githubbot-core", "version": __version__, "spi_version": plugins.SPI_VERSION},
+        "blueprint": role["blueprint"],
+        "permissions": config.get("permissions", {}),
+    }
+    _emit(args, "multi-bot-role", True, "read", data, [], f"MULTI-BOT role {mode} sha256 {data['sha256']}")
     return EXIT_OK
 
 
@@ -348,6 +361,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("system-agent", help="versioned system agent template of this package").set_defaults(
         func=cmd_system_agent
     )
+    p = sub.add_parser("multi-bot-role", help="one MULTI-BOT role as a compatible system-agent descriptor")
+    p.add_argument("--mode", default="triage")
+    p.set_defaults(func=cmd_multibot_role)
 
     p = sub.add_parser("classify", help="classify issues from a JSON file (offline)")
     p.add_argument("--input", required=True)

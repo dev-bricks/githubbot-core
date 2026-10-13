@@ -1,6 +1,5 @@
 """Packaged entrypoints, authorization defaults and external launcher boundary."""
 
-import hashlib
 from importlib import resources
 import json
 import sys
@@ -13,11 +12,15 @@ def test_system_agent_extends_compatible_template_with_verified_roles(capsys):
     assert cli.main(["--json", "system-agent"]) == 0
     data = json.loads(capsys.readouterr().out)["data"]
     assert data["id"] == "githubbot" and data["sha256"].startswith("2e72c000")
-    assert [r["mode"] for r in data["roles"]] == list(multibot.MODES)
-    prompt = resources.files("githubbot_core").joinpath("prompts/MULTI-BOT.de.md").read_bytes()
-    for role in data["roles"]:
-        assert role["sha256"] == cli.template_sha256(data["schema"], role["id"], role["blueprint"])
-        assert role["prompt_sha256"] == hashlib.sha256(prompt).hexdigest()
+    descriptor_fields = {"schema", "id", "version", "sha256", "capability", "blueprint", "permissions"}
+    assert set(data) == descriptor_fields
+    resource = json.loads(resources.files("githubbot_core").joinpath("multibot_roles.json").read_text(encoding="utf-8"))
+    assert [r["mode"] for r in resource["roles"]] == list(multibot.MODES)
+    for mode in multibot.MODES:
+        assert cli.main(["--json", "multi-bot-role", "--mode", mode]) == 0
+        role = json.loads(capsys.readouterr().out)["data"]
+        assert set(role) == descriptor_fields
+        assert role["sha256"] == cli.template_sha256(role["schema"], role["id"], role["blueprint"])
         assert role["blueprint"]["governance"]["profile"] == "read_only_research"
 
 
