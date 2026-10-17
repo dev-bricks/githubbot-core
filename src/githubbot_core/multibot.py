@@ -47,6 +47,44 @@ def permission_contract(config, layers):
     return {"permissions": permissions, "config_layers": [str(Path(path).expanduser().resolve()) for path in layers]}
 
 
+# Public defaults stay conservative; an instance opts in per key via multi_bot.policy.
+POLICY_DEFAULTS = {
+    "review_independence": "model_class",  # provider | model_class | instance
+    "unknown_author": "hold",  # hold | allow
+    "draft_auto_ready_hours": None,  # hours an unchanged head must age before a draft may be readied
+    "draft_ready_when_mature": False,
+    "trigger_missing_ci": False,
+    "publish_reviews": False,
+    "open_fix_prs": False,
+}
+_POLICY_CHOICES = {
+    "review_independence": ("provider", "model_class", "instance"),
+    "unknown_author": ("hold", "allow"),
+}
+
+
+def policy_settings(raw):
+    """Validate multi_bot.policy; unknown keys or wrong types fail closed instead of being ignored."""
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError("multi_bot.policy must be an object")
+    unknown = sorted(set(raw) - set(POLICY_DEFAULTS))
+    if unknown:
+        raise ValueError(f"unknown multi_bot.policy keys: {unknown}")
+    policy = {**POLICY_DEFAULTS, **raw}
+    for key, allowed in _POLICY_CHOICES.items():
+        if policy[key] not in allowed:
+            raise ValueError(f"multi_bot.policy.{key} must be one of {list(allowed)}")
+    hours = policy["draft_auto_ready_hours"]
+    if hours is not None and (type(hours) not in (int, float) or hours <= 0):
+        raise ValueError("multi_bot.policy.draft_auto_ready_hours must be null or a positive number")
+    for key in ("draft_ready_when_mature", "trigger_missing_ci", "publish_reviews", "open_fix_prs"):
+        if type(policy[key]) is not bool:
+            raise ValueError(f"multi_bot.policy.{key} must be a boolean")
+    return policy
+
+
 def choose_mode(value="", *, ask=input, chooser=None):
     value = value.strip().lower()
     if value in ("1", "2", "3"):
@@ -108,6 +146,11 @@ def main(argv=None, *, launch=None):
         request = f"Start MULTI-BOT in mode {mode}. Read the complete packaged role prompt."
         request += " Configured merge account: " + (str(settings.get("merge_account", "")) or "none") + "."
         request += " Merge enabled: " + str(settings.get("merge_enabled") is True).lower() + "."
+        request += (
+            " Policy switches (authoritative, see 'Einstellbare Regeln' in the packaged policy): "
+            + json.dumps(policy_settings(settings.get("policy")), sort_keys=True)
+            + "."
+        )
         if instance:
             request += f" Read the explicitly configured local instance prompt {instance}."
         if args.request:

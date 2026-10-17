@@ -8,6 +8,15 @@
     "model": "",
     "effort": "",
     "root": "",
-    "instance_prompt": ""
+    "instance_prompt": "",
+    "policy": {
+      "review_independence": "model_class",
+      "unknown_author": "hold",
+      "draft_auto_ready_hours": null,
+      "draft_ready_when_mature": false,
+      "trigger_missing_ci": false,
+      "publish_reviews": false,
+      "open_fix_prs": false
+    }
   }
 }
