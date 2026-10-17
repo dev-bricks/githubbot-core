@@ -155,7 +155,7 @@ def test_readonly_ceiling_and_config_layers_reach_the_run_contract(tmp_path):
         request.split("AUTHORITATIVE CORE RUN CONTRACT (not credentials):\n")[1].split("\nPreserve config_layers")[0]
     )
     assert contract == {
-        "permissions": {"ceiling": [], "enabled": [], "api_write_prefixes": []},
+        "permissions": {"ceiling": [], "enabled": [], "api_write_prefixes": [], "effective_enabled": []},
         "config_layers": [str(path.resolve())],
     }
     assert "must-not-copy-secret" not in request and "unknown write authority means HOLD" in request
@@ -189,3 +189,56 @@ def test_explicit_layer_order_is_preserved(tmp_path):
     )
     assert contract["config_layers"] == [str(first.resolve()), str(second.resolve())]
     assert contract["permissions"]["enabled"] == []
+
+
+def _launch_with_policy(tmp_path, policy):
+    config = tmp_path / "policy.json"
+    config.write_text(json.dumps({"multi_bot": {"root": str(tmp_path), "policy": policy}}))
+    launch = Mock(return_value=0)
+    code = multibot.main(["--config", str(config), "--mode", "1", "--no-interactive"], launch=launch)
+    return code, launch
+
+
+def test_policy_switches_default_to_conservative_and_reach_the_request(tmp_path):
+    launch = Mock(return_value=0)
+    assert multibot.main(["--root", str(tmp_path), "--mode", "1", "--no-interactive"], launch=launch) == 0
+    request = launch.call_args.kwargs["request"]
+    assert json.dumps(multibot.policy_settings(None), sort_keys=True) in request
+    assert '"review_independence": "model_class"' in request and '"publish_reviews": false' in request
+
+
+def test_policy_switches_can_be_opted_in_per_instance(tmp_path):
+    code, launch = _launch_with_policy(
+        tmp_path,
+        {
+            "review_independence": "instance",
+            "unknown_author": "allow",
+            "draft_auto_ready_hours": 24,
+            "trigger_missing_ci": True,
+            "publish_reviews": True,
+        },
+    )
+    assert code == 0
+    request = launch.call_args.kwargs["request"]
+    assert '"review_independence": "instance"' in request and '"draft_auto_ready_hours": 24' in request
+    assert '"open_fix_prs": false' in request  # unlisted keys keep the conservative default
+
+
+def test_invalid_policy_switches_fail_closed_before_any_launch(tmp_path, capsys):
+    for bad in (
+        {"review_independence": "whatever"},
+        {"unknown_key": True},
+        {"draft_auto_ready_hours": 0},
+        {"draft_auto_ready_hours": "24"},
+        {"publish_reviews": "yes"},
+        {"unknown_author": None},
+    ):
+        code, launch = _launch_with_policy(tmp_path, bad)
+        assert code != 0 and not launch.called, bad
+        assert "[HOLD]" in capsys.readouterr().err
+
+
+def test_packaged_policy_documents_every_switch():
+    prompt = resources.files("githubbot_core").joinpath("prompts/MULTI-BOT.de.md").read_text(encoding="utf-8")
+    for key in multibot.POLICY_DEFAULTS:
+        assert f"`{key}`" in prompt, key

@@ -112,6 +112,22 @@ stille Überschreibung. `permissions.enabled` muss innerhalb der Obergrenze blei
 | `issue.add_labels` | aktiv | `POST /repos/{repo}/issues/{n}/labels` |
 | `issue.comment` | aktiv | `POST /repos/{repo}/issues/{n}/comments` |
 | `api.request` | aus | beliebige Schreibmethode auf einem Endpunkt, der mit einem Eintrag aus `permissions.api_write_prefixes` beginnt |
+| `pr.merge` | aus | liest den PR frisch (offen, exakter `sha`, Default-Base, kein Draft, `mergeable_state` clean, konfiguriertes Merge-Konto), `PUT …/pulls/{n}/merge` mit `sha`, liest `merged` zurück |
+| `pr.ready` | aus | liest den Draft am exakten `sha` frisch, GraphQL `markPullRequestReadyForReview`, liest zurück |
+| `actions.dispatch` | aus | `POST …/actions/workflows/{workflow}/dispatches` für einen aktiven Workflow |
+| `actions.rerun` | aus | `POST …/actions/runs/{id}/rerun` für einen abgeschlossenen Lauf des exakten `sha`, nie aus Forks |
+| `pr.create` | aus | `POST …/pulls` von einem Branch mit Bot-Präfix auf den Default-Branch |
+| `git.push_branch` | aus | `git push origin <sha>:refs/heads/<branch>` ohne Force, nur Bot-Präfix (`typed_actions.push_branch_prefix`, Standard `bot/`), nie der Default-Branch, Prüfung per `ls-remote` |
+
+Die sechs getypten Aktionen stehen in der Standard-Obergrenze, sind aber nie standardmäßig aktiv.
+Jede braucht zusätzlich ihren `multi_bot`-Schalter (`merge_enabled`, `policy.draft_*`,
+`policy.trigger_missing_ci`, `policy.open_fix_prs`); eine Berechtigung allein öffnet nichts.
+Eine Aktion je Aufruf:
+
+```bash
+githubbot-core --config instanz.json act pr.merge --params '{"repo": "o/r", "number": 7, "sha": "<40-hex>"}'
+githubbot-core --config instanz.json act pr.merge --params '…' --apply --expect-plan <plan_sha256>
+```
 
 ```json
 {"permissions": {"enabled": ["issue.add_labels", "issue.comment", "api.request"],
