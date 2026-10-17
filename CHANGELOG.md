@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 
 ## [Unreleased]
 
+### Hinzugefügt / Added
+
+- Getypte Schreibaktionen `pr.merge`, `pr.ready`, `actions.dispatch`, `actions.rerun`, `pr.create`
+  und `git.push_branch` mit frischem Lesen, exakter Head-Bindung und Rücklesen; in der
+  Standard-Obergrenze, aber nie standardmäßig aktiv. Jede braucht zusätzlich ihren
+  `multi_bot`-Schalter. Neues Kommando `act` (Vorschau, dann `--apply --expect-plan`). Der
+  MULTI-BOT-Laufvertrag nennt `effective_enabled`. / Typed write actions with fresh re-read,
+  exact head binding and readback; in the default ceiling, never enabled by default, each gated
+  by its `multi_bot` switch. New `act` command; the run contract reports `effective_enabled`.
+- Prompt und Rollen-JSON mit festem LF (`.gitattributes`), damit der Policy-Hash nicht vom
+  Checkout abhängt / prompt and role JSON pinned to LF so the policy hash is checkout-independent.
+
 ### Geändert / Changed
 
 - Gesamter Baum mit `ruff format` formatiert (keine Codeänderung, AST identisch); CI prüft jetzt

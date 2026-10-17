@@ -1,3 +1,5 @@
 src/githubbot_core/starters/posix/*.sh text eol=lf
 src/githubbot_core/starters/windows/*.bat text eol=crlf
 src/githubbot_core/starters/windows/providers/*.bat text eol=crlf
+src/githubbot_core/prompts/*.md text eol=lf
+src/githubbot_core/*.json text eol=lf

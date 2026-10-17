@@ -110,6 +110,21 @@ not a silent override. `permissions.enabled` must stay inside the ceiling.
 | `issue.add_labels` | enabled | `POST /repos/{repo}/issues/{n}/labels` |
 | `issue.comment` | enabled | `POST /repos/{repo}/issues/{n}/comments` |
 | `api.request` | disabled | any write method on an endpoint that starts with one of `permissions.api_write_prefixes` |
+| `pr.merge` | disabled | re-reads the PR (open, exact `sha`, default base, not draft, `mergeable_state` clean, configured merge account), `PUT …/pulls/{n}/merge` with `sha`, reads `merged` back |
+| `pr.ready` | disabled | re-reads the draft at the exact `sha`, GraphQL `markPullRequestReadyForReview`, reads back |
+| `actions.dispatch` | disabled | `POST …/actions/workflows/{workflow}/dispatches` for an active workflow |
+| `actions.rerun` | disabled | `POST …/actions/runs/{id}/rerun` for a completed, non-fork run of the exact `sha` |
+| `pr.create` | disabled | `POST …/pulls` from a bot-prefixed branch onto the default branch |
+| `git.push_branch` | disabled | `git push origin <sha>:refs/heads/<branch>` without force, bot prefix only (`typed_actions.push_branch_prefix`, default `bot/`), never the default branch, verified with `ls-remote` |
+
+The six typed actions sit in the default ceiling but are never enabled by default. Each one also
+needs its `multi_bot` switch (`merge_enabled`, `policy.draft_*`, `policy.trigger_missing_ci`,
+`policy.open_fix_prs`); a permission alone opens nothing. One action at a time:
+
+```bash
+githubbot-core --config instance.json act pr.merge --params '{"repo": "o/r", "number": 7, "sha": "<40-hex>"}'
+githubbot-core --config instance.json act pr.merge --params '…' --apply --expect-plan <plan_sha256>
+```
 
 ```json
 {"permissions": {"enabled": ["issue.add_labels", "issue.comment", "api.request"],
