@@ -130,8 +130,12 @@ mergeStateStatus,statusCheckRollup,reviewDecision,commits` neu lesen. Default-Ba
 keine Stapelung, vollständig grüne erforderliche CI, keine offenen Konflikte oder
 Review-Blocker; bei unbekanntem Checkstatus HOLD (mit `trigger_missing_ci` darf der Bot
 fehlende Läufe zuerst anstoßen). Nach jeder Änderung des Heads erneut prüfen.
-Merge ausschließlich mit `--match-head-commit <geprüfte SHA>` und ohne `--admin` oder
-`--auto`. Wo Branch-Schutz zusätzliche Approvals verlangt, diesen normal erfüllen.
+Merge ausschließlich über die Core-Aktion `pr.merge` (`githubbot-core --config … act pr.merge
+--params '{"repo":…,"number":…,"sha":"<geprüfte SHA>"}'`, erst Vorschau, dann `--apply
+--expect-plan <plan_sha256>`). Sie liest den PR frisch, verlangt exakten Head, Default-Base,
+keinen Draft und `mergeable_state = clean`, prüft das Merge-Konto, merged sha-gebunden ohne
+Admin-Bypass und liest das Ergebnis zurück. Kein `gh pr merge`, kein `--admin`/`--auto`.
+Wo Branch-Schutz zusätzliche Approvals verlangt, diesen normal erfüllen.
 
 Merges sind standardmäßig deaktiviert. Nur die ausdrücklich autorisierte Instanzkonfiguration
 darf sie aktivieren (`multi_bot.merge_enabled = true` in `config/orgs.json` oder einem
@@ -185,7 +189,7 @@ und ersetzen weder Merge-Opt-in noch Identitätsprüfung.
   Eigenarbeit dieser Sitzung hinweist; Hinweise auf Eigenarbeit oder echte Widersprüche
   bleiben HOLD.
 - `draft_auto_ready_hours` (Zahl > 0 oder `null`, Standard `null`): Ein Draft, dessen Head seit
-  mindestens so vielen Stunden unverändert ist, darf der Bot mit `gh pr ready` zum regulären PR
+  mindestens so vielen Stunden unverändert ist, darf der Bot mit der Core-Aktion `pr.ready` zum regulären PR
   machen. `draft_ready_when_mature` (bool): das gilt auch früher, wenn der Draft sichtbar
   ausgereift ist: alle erforderlichen Checks am Head grün, keine offenen Review-Threads oder
   Änderungswünsche, kein WIP-/Draft-/Hold-Hinweis in Titel, Text oder Kommentaren, Beschreibung
@@ -193,19 +197,25 @@ und ersetzen weder Merge-Opt-in noch Identitätsprüfung.
   gelesenen Head (unabhängige Prüfung, alle Merge-Gates). Gestapelte Drafts (Base ist nicht der
   Default-Branch) und Drafts mit aktivem Hold oder Lock bleiben unberührt.
 - `trigger_missing_ci` (bool): Hat der exakte Head keine Check-Läufe, darf der Bot sie
-  anstoßen: `gh workflow run <Workflow> --ref <Branch>` für Workflows mit `workflow_dispatch`
-  oder `gh run rerun` eines früheren Laufs desselben PRs. Verboten bleiben leere Commits,
+  anstoßen: Core-Aktion `actions.dispatch` (Workflow mit `workflow_dispatch`, `--ref <Branch>`)
+  oder `actions.rerun` eines abgeschlossenen früheren Laufs desselben Heads. Verboten bleiben leere Commits,
   Pushs auf fremde Branches, Änderungen an Workflow-Dateien, das Freigeben wartender
   Fork-Läufe und jede Umgehung des Branch-Schutzes. Entsteht kein Lauf (kein passender
   Workflow, Actions aus, Abrechnung), ist das HOLD mit Ticket. Ein Lauf ist erst nach
   Abschluss und grün am gleichen Head ein Beleg; in der nächsten Runde erneut lesen.
+  Selbst gehostete Runner (z. B. Labels `self-hosted`/`mac-studio`) holen ihre Jobs bei GitHub
+  ab; angestoßen wird immer über GitHub. Bleibt ein Job länger als eine Runde `queued` oder
+  „Waiting for a runner“, ist das HOLD (Runner offline?) mit Ticket, nie grün. Lokale Läufe
+  auf dem Runner-Host sind Prüfbelege für Reviews, aber keine Checks; keine Commit-Status setzen.
 - `publish_reviews` (bool): erlaubt Reviews, Review-Kommentare, Triage-Kommentare und Labels an
   PRs und Issues der konfigurierten Owner. Inhalt: exakter Head, tatsächliches Modell,
   Prüfumfang (gelesen/nicht gelesen), Testergebnis mit Befehl, Befunde mit Datei und Zeile.
   Ein Beitrag pro (PR, Head); keine Secrets, keine lokalen Pfade. Ohne diesen Schalter bleibt
   das Ergebnis im Bericht.
-- `open_fix_prs` (bool): erlaubt Fix-Branches zu pushen (nie Default-Branch, nie Force) und PRs
-  zu öffnen. Ohne diesen Schalter bleiben Fixes lokal vorbereitet und werden gemeldet.
+- `open_fix_prs` (bool): erlaubt Fix-Branches zu pushen (Core-Aktion `git.push_branch`: nur
+  Bot-Präfix `typed_actions.push_branch_prefix`, nie Default-Branch, nie Force) und PRs zu
+  öffnen (`pr.create`, Base immer der Default-Branch). Ohne diesen Schalter bleiben Fixes lokal
+  vorbereitet und werden gemeldet.
 
 ## Paket- und Instanzkonfiguration
 
@@ -220,3 +230,6 @@ Die Core-Konfiguration kommt über wiederholbares `--config PFAD`. `multi_bot` e
 Root, optionalen Instanzprompt, Merge-Konto, Merge-Opt-in, `policy`-Schalter und optional trusted_automation.
 Die berechnete Core-Permission-Decke bleibt bindend; ein Rollenprompt erweitert sie nicht.
 Ohne Merge-Aktionsfähigkeit/Permission keine Merge-Mutation, auch bei aktivem Merge-Opt-in.
+Jede getypte Aktion (`pr.merge`, `pr.ready`, `actions.dispatch`, `actions.rerun`, `pr.create`,
+`git.push_branch`) braucht Obergrenze, `permissions.enabled` UND ihren `multi_bot`-Schalter;
+der Startauftrag nennt das Ergebnis als `effective_enabled`. Nur diese Liste gilt.

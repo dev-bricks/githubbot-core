@@ -316,6 +316,15 @@ def cmd_run(args, config, transport) -> int:
     return _plan_output(args, "run", plan, config, transport, {"plugin": args.plugin})
 
 
+def cmd_act(args, config, transport) -> int:
+    """One explicit write action through the same preview/apply contract as every plan."""
+    params = json.loads(args.params)
+    if not isinstance(params, dict):
+        raise ValueError("--params must be a JSON object")
+    plan = [actions.Action(args.kind, params, reason=args.reason or args.kind, source="act")]
+    return _plan_output(args, "act", plan, config, transport, {"kind": args.kind})
+
+
 def cmd_gate_scaffold(args, config, transport) -> int:
     names = gate_names(args.namespace)
     package = resources.files("githubbot_core")
@@ -419,6 +428,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_apply_flags(p)
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("act", help="preview or apply one typed write action (pr.merge, pr.ready, ...)")
+    p.add_argument("kind", help="action kind, for example pr.merge")
+    p.add_argument(
+        "--params", required=True, help='JSON object, for example {"repo": "o/r", "number": 1, "sha": "..."}'
+    )
+    p.add_argument("--reason", default="")
+    add_apply_flags(p)
+    p.set_defaults(func=cmd_act)
 
     p = sub.add_parser("gate-scaffold", help="copy the review-gate workflow and verifier into a repository")
     p.add_argument("--dest", required=True, help="root of the target repository checkout")

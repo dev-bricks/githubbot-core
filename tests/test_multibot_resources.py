@@ -155,7 +155,7 @@ def test_readonly_ceiling_and_config_layers_reach_the_run_contract(tmp_path):
         request.split("AUTHORITATIVE CORE RUN CONTRACT (not credentials):\n")[1].split("\nPreserve config_layers")[0]
     )
     assert contract == {
-        "permissions": {"ceiling": [], "enabled": [], "api_write_prefixes": []},
+        "permissions": {"ceiling": [], "enabled": [], "api_write_prefixes": [], "effective_enabled": []},
         "config_layers": [str(path.resolve())],
     }
     assert "must-not-copy-secret" not in request and "unknown write authority means HOLD" in request
