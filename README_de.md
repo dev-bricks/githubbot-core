@@ -183,3 +183,40 @@ Historie aufgebaut. Es ist kein Fremdcode enthalten; siehe
 ## Lizenz
 
 [MIT](LICENSE)
+
+
+## MULTI-BOT als optionale Agentenrolle
+
+`python -m githubbot_core multi-bot` startet die paketierte Rolle über TASKPLAN. Das sichtbare Menü enthält **1 operator** (Standard), **2 bot-triage** (nur PR-Triage/Reviews) und **3 github-maintain** (Fixes und Pflege). Operator prüft vor jeder neuen Einheit frisch PRs, dann konkrete Fixes, dann Policies/Gates/Privacy und Care. Die 3a/3b-Heuristik bevorzugt anfangs Policies und wechselt nach belegten Abschlüssen; dringende Policies gehen vor normaler Care. Das Startcenter verwendet denselben CLI-Aufruf.
+`--provider`, `--model`, `--effort` und `--mode` wählen ausdrücklich; die Provider-Ausführung
+bleibt in TASKPLAN. Fehlt dieses optionale Modul, erscheint ein Installationshinweis und
+kein Anbieter startet. `--dry-run` aktiviert TASKPLANs Trockenlauf ohne Sonde.
+
+Wheel und sdist enthalten den deutschen Prompt, neutrale Windows-/POSIX-Starter und die
+Care-/Probe-Helfer. Ressourcen: `githubbot_core/prompts/MULTI-BOT.de.md`,
+`githubbot_core/starters/windows/MULTI-BOT.bat`, `starters/windows/providers/`,
+`starters/posix/start-multi-bot.sh`. Auf POSIX funktioniert `sh start-multi-bot.sh` auch
+bei verlorenem Ausführungsrecht. Systemprofil: `githubbot-core --json multi-bot-role --mode operator`
+exportiert jeweils einen Rollen-Descriptor im bestehenden strikten Schema. Der bisherige
+`system-agent`-Descriptor bleibt unverändert; die drei Rollen stehen separat in der
+Paketresource `multibot_roles.json`.
+
+Standardmäßig ist der Betriebsroot das aktuelle Verzeichnis, Merge deaktiviert und
+Vollzugriff nicht erzwungen. Explizite private Konfiguration: `multi_bot.root`,
+`instance_prompt`, `merge_account`, `merge_enabled`, optional `trusted_automation` in
+`--config DATEI`; `MULTIBOT_ROOT`/`MULTIBOT_INSTANCE_PROMPT` sind entsprechende Overrides.
+Der Starter lädt keine Tokens aus einem festen Credential-Ordner. Konten, Auth, Slots und
+Hostpfade gehören in die Instanz, niemals in die neutrale Vorlage. Core-Permissions können
+weiterhin nur eingeschränkt werden; der Rollenprompt erweitert die Aktionsrechte nicht.
+
+`githubbot-core multi-bot-care --root PFAD next` und `multi-bot-probe --root PFAD` lesen
+explizite Instanzdaten (`config/repo_registry.json`, `config/orgs.json`, Hostlogs). Ohne
+Daten melden sie HOLD. Claims ersetzen keine Projektsperren; keine ausführbare Merge-Automatik
+oder neue Hintergrundroutine wird installiert. Private Extensions und private Runtime
+bleiben eigenständige, getrennte Konsumenten.
+
+Die alten benannten Flags `triage`, `review-merge`, `aftercare` bleiben mit ihrem bisherigen begrenzten Umfang verfügbar, erscheinen aber nicht im neuen Dreiermenü. Eine Rollenwahl aktiviert keine Merges und erweitert keine Permission-Decke.
+
+`githubbot-core --json multi-bot-select --input SNAPSHOT.json --mode operator` wählt deterministisch und ausschließlich lesend aus vorhandenen Kandidaten. Keine Queue, Auftragsanlage, Persistierung oder Agentenstarts. Der Snapshot enthält `candidates`, optional `processed` und `lastMaintenance`: Kandidaten brauchen `id`, exakte 40-stellige lowercase Commit-`revision`, `status` (`ready`, `blocked`, `done`), `category` (`prs`, `fixes`, `policies`, `care`) und optional `urgent` (bool). Ein `processed`-Eintrag bindet dieselben Felder an `blocked`/`done` und eine nichtleere `evidence`-Referenz; die tatsächliche Belegprüfung liegt beim Aufrufer. `lastMaintenance` ist ein `{id, revision}`-Verweis auf einen solchen erfolgreichen Policies-/Care-Abschluss. Auswahl und zwei leere Prüfungen verändern nichts. Unbekannte Werte werden abgewiesen. Neue PR-Heads kommen wieder vor Fixes/Pflege; erledigte oder blockierte gleiche Heads bleiben übersprungen, bis der zuständige Workflow neue Belege liefert. Gleichrangige Kandidaten werden nach ID und SHA sortiert.
+
+Der öffentliche ASCII-Windows-Starter trägt den Titel MULTI-BOT COMPANION, zeigt den Vordergrundbetrieb und wartet nach Erfolg, Fehler oder STOP auf eine Taste. Ausnahmen: explizites `--dry-run`, `TASKPLAN_STARTER_DRY_RUN=1` oder `MULTIBOT_NO_PAUSE=1`. Er installiert nichts und öffnet kein zusätzliches Fenster.

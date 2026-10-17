@@ -160,6 +160,35 @@ def cmd_system_agent(args, config, transport) -> int:
     return EXIT_OK
 
 
+def cmd_multibot_role(args, config, transport) -> int:
+    """Export one role using exactly the existing system-agent descriptor shape."""
+    from .multibot import choose_mode, packaged_role
+
+    mode = choose_mode(args.mode)
+    schema, role_id, blueprint = packaged_role(mode, package=resources.files("githubbot_core"))
+    data = {
+        "schema": schema,
+        "id": role_id,
+        "version": __version__,
+        "sha256": template_sha256(schema, role_id, blueprint),
+        "capability": {"package": "githubbot-core", "version": __version__, "spi_version": plugins.SPI_VERSION},
+        "blueprint": blueprint,
+        "permissions": config.get("permissions", {}),
+    }
+    _emit(args, "multi-bot-role", True, "read", data, [], f"MULTI-BOT role {mode} sha256 {data['sha256']}")
+    return EXIT_OK
+
+
+def cmd_multibot_select(args, config, transport) -> int:
+    """Choose from an existing offline snapshot; never enqueue, persist or execute work."""
+    from .multibot_select import select_work
+
+    snapshot = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    data = select_work(snapshot, mode=args.mode)
+    _emit(args, "multi-bot-select", True, "read", data, [], data["reason"])
+    return EXIT_OK
+
+
 def cmd_classify(args, config, transport) -> int:
     classifier = IssueClassifier(config)
     results = [classifier.classify(issue) for issue in _read_issues(Path(args.input))]
@@ -340,6 +369,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("system-agent", help="versioned system agent template of this package").set_defaults(
         func=cmd_system_agent
     )
+    p = sub.add_parser("multi-bot-role", help="one MULTI-BOT role as a compatible system-agent descriptor")
+    p.add_argument("--mode", default="operator")
+    p.set_defaults(func=cmd_multibot_role)
+
+    p = sub.add_parser("multi-bot-select", help="read-only deterministic selection from an existing snapshot")
+    p.add_argument("--input", required=True)
+    p.add_argument("--mode", default="operator", choices=("operator", "bot-triage", "github-maintain"))
+    p.set_defaults(func=cmd_multibot_select)
 
     p = sub.add_parser("classify", help="classify issues from a JSON file (offline)")
     p.add_argument("--input", required=True)
@@ -390,6 +427,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_gate_scaffold)
 
     sub.add_parser("review-gate", help="signed exact-SHA receipts (see: review-gate --help)", add_help=False)
+    for name in ("multi-bot", "multi-bot-care", "multi-bot-probe"):
+        sub.add_parser(name, help="packaged MULTI-BOT role and runtime helpers", add_help=False)
     return parser
 
 
@@ -408,6 +447,15 @@ def _subcommand_index(argv: list[str]) -> Optional[int]:
 def main(argv: Optional[list[str]] = None, transport=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     index = _subcommand_index(argv)
+    if index is not None and argv[index] in {"multi-bot", "multi-bot-care", "multi-bot-probe"}:
+        from . import multibot, multibot_care, multibot_probe
+
+        entry = {
+            "multi-bot": multibot.main,
+            "multi-bot-care": multibot_care.main,
+            "multi-bot-probe": multibot_probe.main,
+        }[argv[index]]
+        return entry(argv[:index] + argv[index + 1 :])
     if index is not None and argv[index] == "review-gate":
         from . import review_gate
 
