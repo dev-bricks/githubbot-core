@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from . import typed_actions
+
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -50,6 +52,11 @@ def denial_reason(action: Action, config: dict) -> Optional[str]:
         return f"{action.kind} is not enabled in permissions.enabled"
     if action.kind not in EXECUTORS:
         return f"{action.kind} has no executor"
+    reason = typed_actions.switch_denial(action.kind, config) or typed_actions.param_denial(
+        action.kind, action.params, config
+    )
+    if reason:
+        return reason
     if action.kind == "api.request":
         method = str(action.params.get("method", "")).upper()
         endpoint = str(action.params.get("endpoint", "")).lstrip("/")
@@ -69,19 +76,19 @@ def preview(actions: list[Action], config: dict) -> dict:
     return {"mode": "preview", "plan_sha256": plan_digest(actions), "actions": items, "writes": 0}
 
 
-def _exec_add_labels(transport, params: dict):
+def _exec_add_labels(transport, params: dict, config: dict):
     return transport.request(
         "POST", f"repos/{params['repo']}/issues/{int(params['number'])}/labels", {"labels": list(params["labels"])}
     )
 
 
-def _exec_comment(transport, params: dict):
+def _exec_comment(transport, params: dict, config: dict):
     return transport.request(
         "POST", f"repos/{params['repo']}/issues/{int(params['number'])}/comments", {"body": str(params["body"])}
     )
 
 
-def _exec_api_request(transport, params: dict):
+def _exec_api_request(transport, params: dict, config: dict):
     return transport.request(str(params["method"]).upper(), str(params["endpoint"]).lstrip("/"), params.get("body"))
 
 
@@ -89,6 +96,7 @@ EXECUTORS = {
     "issue.add_labels": _exec_add_labels,
     "issue.comment": _exec_comment,
     "api.request": _exec_api_request,
+    **typed_actions.EXECUTORS,
 }
 
 
@@ -139,9 +147,11 @@ def apply(
         elif action.action_id in applied_before:
             record.update(status="skipped_duplicate", detail="already applied according to the receipt store")
         else:
-            _, error = EXECUTORS[action.kind](transport, action.params)
+            data, error = EXECUTORS[action.kind](transport, action.params, config)
             writes += 1
             record.update(status="failed" if error else "applied", detail=error or "")
+            if not error and isinstance(data, dict) and "readback" in data:
+                record["readback"] = data["readback"]
         receipts.append(record)
         if receipt_store is not None:
             receipt_store.parent.mkdir(parents=True, exist_ok=True)

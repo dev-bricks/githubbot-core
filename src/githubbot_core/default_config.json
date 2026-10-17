@@ -4,7 +4,17 @@
     "description": "Neutral defaults. Override with --config <file> layers; permission ceilings can only be narrowed by later layers."
   },
   "permissions": {
-    "ceiling": ["issue.add_labels", "issue.comment", "api.request"],
+    "ceiling": [
+      "issue.add_labels",
+      "issue.comment",
+      "api.request",
+      "pr.merge",
+      "pr.ready",
+      "actions.dispatch",
+      "actions.rerun",
+      "pr.create",
+      "git.push_branch"
+    ],
     "enabled": ["issue.add_labels", "issue.comment"]
   },
   "label_schema": {
