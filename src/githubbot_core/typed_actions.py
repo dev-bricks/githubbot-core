@@ -124,6 +124,11 @@ def _reviewed_pull(transport, params: dict, *, draft: bool) -> tuple[dict, Optio
     return pull, None
 
 
+MERGE_READBACK_QUERY = (
+    "query($id: ID!) { node(id: $id) { ... on PullRequest { state headRefOid mergeCommit { oid } } } }"
+)
+
+
 def exec_merge(transport, params: dict, config: dict):
     account = str((config.get("multi_bot") or {}).get("merge_account") or "")
     if account:
@@ -143,9 +148,28 @@ def exec_merge(transport, params: dict, config: dict):
     if error:
         return None, error
     after, error = _pull(transport, repo, number)
-    if error or not after.get("merged") or not after.get("merge_commit_sha"):
+    if error or after.get("merged") is not True:
         return None, "merge not confirmed by readback"
-    return {"readback": {"merged": True, "merge_commit_sha": after["merge_commit_sha"]}}, None
+    commit_sha = after.get("merge_commit_sha")
+    if not commit_sha:
+        # REST 2026-03-10 removed merge_commit_sha from pull request objects.
+        # Read the actual merged commit; never retry the merge or trust acceptance alone.
+        if not pull.get("node_id"):
+            return None, "merge not confirmed by readback"
+        data, error = transport.request(
+            "POST", "graphql", {"query": MERGE_READBACK_QUERY, "variables": {"id": pull["node_id"]}}
+        )
+        if error or not isinstance(data, dict) or data.get("errors"):
+            return None, "merge not confirmed by readback"
+        payload = data.get("data")
+        node = payload.get("node") if isinstance(payload, dict) else None
+        if not isinstance(node, dict) or node.get("state") != "MERGED" or node.get("headRefOid") != params["sha"]:
+            return None, "merge not confirmed by readback"
+        commit = node.get("mergeCommit")
+        commit_sha = commit.get("oid") if isinstance(commit, dict) else None
+    if not SHA.fullmatch(str(commit_sha or "")):
+        return None, "merge not confirmed by readback"
+    return {"readback": {"merged": True, "merge_commit_sha": commit_sha}}, None
 
 
 READY_MUTATION = (
