@@ -51,6 +51,7 @@ class GhCliTransport:
                 encoding="utf-8",
                 errors="replace",
                 timeout=self.timeout,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except subprocess.TimeoutExpired:
             return "", "Timeout"

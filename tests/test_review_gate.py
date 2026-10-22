@@ -129,12 +129,14 @@ def test_real_ssh_signature_is_bound_to_principal_and_receipt(tmp_path: Path) ->
     subprocess.run(
         ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
         check=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     receipt_path = tmp_path / "receipt.json"
     receipt_path.write_bytes(canonical_receipt_bytes(_receipt()))
     subprocess.run(
         ["ssh-keygen", "-Y", "sign", "-f", str(key), "-n", "githubbot-review-gate", str(receipt_path)],
         check=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     allowed = tmp_path / "allowed_signers"
     public_key = key.with_suffix(".pub").read_text(encoding="utf-8").strip()
@@ -335,7 +337,11 @@ def test_cli_create_writes_a_canonical_receipt(tmp_path: Path) -> None:
 @pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="OpenSSH ssh-keygen is unavailable")
 def test_cli_sign_writes_only_the_requested_signature(tmp_path: Path) -> None:
     key = tmp_path / "reviewer"
-    subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+    subprocess.run(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
+        check=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
     receipt = tmp_path / "receipt.json"
     current = datetime.now(timezone.utc).replace(microsecond=0)
     current_receipt = _receipt(

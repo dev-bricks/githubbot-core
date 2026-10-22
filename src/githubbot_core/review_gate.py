@@ -358,6 +358,7 @@ def verify_ssh_signature(
             input=receipt_bytes,
             capture_output=True,
             timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", errors="replace").strip()
@@ -395,6 +396,7 @@ def sign_receipt(receipt_path: Path, key_path: Path, output_path: Path, namespac
             encoding="utf-8",
             errors="replace",
             timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if result.returncode != 0:
             raise ReceiptValidationError(f"receipt signing failed: {result.stderr.strip() or result.stdout.strip()}")
@@ -542,6 +544,7 @@ def _resolve_token() -> str:
         encoding="utf-8",
         errors="replace",
         timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if result.returncode != 0 or not result.stdout.strip():
         raise ReceiptValidationError("no GitHub token available")

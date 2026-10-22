@@ -26,7 +26,16 @@ pytestmark = pytest.mark.skipif(
 def _run(cmd, cwd, **kwargs):
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env.pop("PYTHONPATH", None)
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", env=env, **kwargs)
+    return subprocess.run(
+        cmd,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        **kwargs,
+    )
 
 
 @pytest.mark.parametrize("artifact_variable", ["GITHUBBOT_CORE_TEST_WHEEL", "GITHUBBOT_CORE_TEST_SDIST"])
