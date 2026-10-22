@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from githubbot_core import actions, cli, typed_actions
 from githubbot_core.actions import Action
 from githubbot_core.config import default_config, merge_layers
@@ -131,6 +133,73 @@ def test_merge_without_readback_is_failed():
     gets[f"repos/{REPO}/pulls/7"] = pull()  # never shows merged
     receipt = actions.apply([merge_action()], Transport(gets), config())["receipts"][0]
     assert receipt["status"] == "failed" and "readback" in receipt["detail"]
+
+
+class MergeReadbackTransport(Transport):
+    """The versioned REST readback omits merge_commit_sha; GraphQL still exposes it."""
+
+    def __init__(self, node=None, *, graphql_error=None, graphql_errors=None, after=None):
+        gets = base_gets()
+        gets[f"repos/{REPO}/pulls/7"] = [pull(), pull(merged=True) if after is None else after]
+        super().__init__(gets)
+        self.graphql = {"data": {"node": node}, "errors": graphql_errors}
+        self.graphql_error = graphql_error
+
+    def request(self, method, endpoint, body=None):
+        if endpoint == "graphql":
+            self.writes.append((method, endpoint, body))
+            return self.graphql, self.graphql_error
+        return super().request(method, endpoint, body)
+
+
+def merged_node(**overrides):
+    return {"state": "MERGED", "headRefOid": SHA, "mergeCommit": {"oid": OTHER}, **overrides}
+
+
+def test_merge_api_2026_readback_confirms_the_commit_and_reviewed_head():
+    transport = MergeReadbackTransport(merged_node())
+    receipt = actions.apply([merge_action()], transport, config())["receipts"][0]
+    assert receipt["status"] == "applied"
+    assert receipt["readback"] == {"merged": True, "merge_commit_sha": OTHER}
+    assert transport.writes[0] == ("PUT", f"repos/{REPO}/pulls/7/merge", {"sha": SHA, "merge_method": "merge"})
+    method, endpoint, body = transport.writes[1]
+    assert (method, endpoint, body["variables"]) == ("POST", "graphql", {"id": "PR_node"})
+    assert body["query"].lstrip().startswith("query")
+    assert len(transport.writes) == 2  # one merge attempt and one read-only query
+
+
+@pytest.mark.parametrize(
+    "node",
+    [
+        None,
+        {},
+        merged_node(state="OPEN"),
+        merged_node(state="CLOSED"),
+        merged_node(headRefOid=OTHER),
+        merged_node(mergeCommit=None),
+        merged_node(mergeCommit={}),
+        merged_node(mergeCommit={"oid": "not-a-commit"}),
+    ],
+)
+def test_merge_api_2026_needs_a_confirmed_commit_at_the_reviewed_head(node):
+    transport = MergeReadbackTransport(node)
+    receipt = actions.apply([merge_action()], transport, config())["receipts"][0]
+    assert receipt["status"] == "failed" and "readback" in receipt["detail"]
+    assert sum(endpoint.endswith("/merge") for _, endpoint, _ in transport.writes) == 1
+
+
+@pytest.mark.parametrize("kwargs", [{"graphql_error": "Timeout"}, {"graphql_errors": [{"message": "unavailable"}]}])
+def test_merge_api_2026_does_not_accept_a_graphql_error(kwargs):
+    transport = MergeReadbackTransport(merged_node(), **kwargs)
+    receipt = actions.apply([merge_action()], transport, config())["receipts"][0]
+    assert receipt["status"] == "failed" and "readback" in receipt["detail"]
+
+
+def test_merge_api_2026_does_not_query_when_rest_has_not_confirmed_the_merge():
+    transport = MergeReadbackTransport(merged_node(), after=pull())
+    receipt = actions.apply([merge_action()], transport, config())["receipts"][0]
+    assert receipt["status"] == "failed"
+    assert len(transport.writes) == 1
 
 
 def test_ready_uses_graphql_for_the_exact_draft_head():
