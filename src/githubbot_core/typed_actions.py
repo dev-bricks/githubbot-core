@@ -240,7 +240,14 @@ def exec_create_pr(transport, params: dict, config: dict):
 
 
 def _run_git(path: str, *args: str) -> tuple[str, Optional[str]]:
-    result = _git(["git", "-C", path, *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    result = _git(
+        ["git", "-C", path, *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
     if result.returncode:
         return "", " ".join((result.stderr or result.stdout or "").split())[:500] or f"git exit {result.returncode}"
     return result.stdout.strip(), None

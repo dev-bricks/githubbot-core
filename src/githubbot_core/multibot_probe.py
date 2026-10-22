@@ -13,7 +13,15 @@ import sys
 
 
 def query(args, *, run=subprocess.run):
-    result = run(["gh", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90)
+    result = run(
+        ["gh", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=90,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
     if result.returncode:
         # Do not forward arbitrary CLI stderr (may contain credential configuration).
         return {"ok": False, "exit_code": result.returncode, "error": "GitHub-Abfrage fehlgeschlagen"}

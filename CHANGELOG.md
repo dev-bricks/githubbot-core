@@ -6,6 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 
 ## [Unreleased]
 
+### Behoben / Fixed
+
+- Windows-Konsolenstarts für GitHub-Abfragen, Credential-Lookup, Git-Push und
+  SSH-Reviewbelege verwenden `CREATE_NO_WINDOW`, auch unter einem konsolenlosen
+  Elternprozess. Testhelfer schützen ihre eigenen Kindstarts ebenso. Auf POSIX
+  bleibt das Verhalten unverändert. / Hide console children at every explicit
+  CLI boundary, including test helpers; POSIX behavior is unchanged.
+
 ### Hinzugefügt / Added
 
 - Getypte Schreibaktionen `pr.merge`, `pr.ready`, `actions.dispatch`, `actions.rerun`, `pr.create`
