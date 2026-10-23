@@ -8,6 +8,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 
 ### Hinzugefügt / Added
 
+- Getypte Schreibaktion `pr.review` für formale Reviews am exakten PR-Head mit Bot-Identitätsprüfung,
+  `publish_reviews`-Gate und unabhängigem Readback. Issue-Labels/-Kommentare binden MULTI-BOT-
+  Schreibvorgänge an das konfigurierte Konto und lesen Änderungen zurück. /
+  Added exact-head formal PR reviews with configured bot identity, a `publish_reviews` gate and
+  readback; MULTI-BOT issue writes now verify the configured account and read changes back.
+- Selector und Rollen um Issue-Triage erweitert; Operator bearbeitet einzelne Kandidaten mit
+  frischer Auswahl weiter, bis der Umfang erledigt oder konkret blockiert ist. /
+  Selector and roles now include issue triage; operator continues across selected candidates with
+  refreshed state until the requested scope is complete or concretely blocked.
 - Getypte Schreibaktionen `pr.merge`, `pr.ready`, `actions.dispatch`, `actions.rerun`, `pr.create`
   und `git.push_branch` mit frischem Lesen, exakter Head-Bindung und Rücklesen; in der
   Standard-Obergrenze, aber nie standardmäßig aktiv. Jede braucht zusätzlich ihren

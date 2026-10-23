@@ -18,7 +18,9 @@ Modus. Keine Unteragenten starten oder zusätzliche kostenpflichtige Dienste bes
    Betriebsregister/Logs im konfigurierten Betriebsroot; lokale Instanzregeln entscheiden
    über Spiegel-/Cloud- und Hostpfade. Ohne belegte Konfiguration keine Pfade erfinden.
    Nutze `run.py registry show`, `_tools/repo_radar.py` und die vorhandenen Werkzeuge.
-   Erfinde keine zweite Registry. `audit_open_prs.py` liefert Hinweise, keine Merge-Freigabe:
+   Erfinde keine zweite Registry. Wenn eine benötigte Core-Aktion wie `pr.review` im installierten
+   Laufvertrag fehlt, ist das eine konkrete Core-Fähigkeitslücke; verwende keinen Ersatzkommentar
+   als formalen Review und klassifiziere das nicht als Tokenfehler. `audit_open_prs.py` liefert Hinweise, keine Merge-Freigabe:
    seine Empfehlung kann bei Drafts oder unvollständiger CI zu optimistisch sein.
 3. Vor Änderungen, Commit, Push und Merge den echten `lock_scan.py --check-dir <Pfad>
    --json` über einen aufgelösten Python-Interpreter ausführen: lokaler Klon (bei Worktrees
@@ -31,9 +33,10 @@ Modus. Keine Unteragenten starten oder zusätzliche kostenpflichtige Dienste bes
    Bot-Schreibfeatures dort. Keine gestapelten PRs mergen; Drafts nur nach den Schaltern
    `draft_auto_ready_hours`/`draft_ready_when_mature` (Abschnitt „Einstellbare Regeln“). Keine
    Force-Pushes, Admin-/Bypass-Merges, Publikation, Tags, Releases oder Sichtbarkeitsänderungen.
-   Keine Dritt-Nachrichten, Einladungen, Follow-Aktionen oder Kommentare ohne explizite
-   Autorisierung; für Reviews und Triage an PRs/Issues der konfigurierten Owner ist das der
-   Schalter `publish_reviews`.
+   Keine Dritt-Nachrichten, Einladungen oder Follow-Aktionen. Triage-Labels und
+   Unterhaltungskommentare nur über die aktivierten `issue.add_labels`/`issue.comment`-Aktionen,
+   für den konfigurierten Bot-Account und innerhalb der freigegebenen Owner. Formale PR-Reviews
+   brauchen zusätzlich `publish_reviews` und die getypte Aktion `pr.review`.
 5. Echte Nutzerentscheidungen mit dem vorhandenen `ticket_writer.py` als Ticket erfassen;
    nicht in alte `USER-DECIDE-NEEDED.md`-Wrapper schreiben. Fremde Arbeit nie mitcommitten.
 
@@ -44,31 +47,37 @@ und **3 github-maintain**. Die benannten alten Flags triage, review-merge und af
 bleiben als begrenzte Legacy-Abläufe erhalten; sie erscheinen nicht im neuen Dreiermenü.
 Eine Rollenwahl ist keine neue Schreib-, Merge- oder Startberechtigung.
 
-Kategorien: **1 prs** = PR-Triage und unabhängige Reviews; **2 fixes** = konkrete
-Sicherheits- und allgemeine Fehlerbehebungen; **3a policies** = Policies, Gates und
-Privacy; **3b care** = konservative Repository-/Org-Pflege. Nach jeder abgeschlossenen
-Arbeit und vor jeder neuen Arbeitseinheit Kategorie 1 frisch lesend prüfen. Ein
+Arbeitskategorien und Reihenfolge: **prs** = PR-Triage und unabhängige Reviews; **issues** =
+Issue-Triage; **fixes** = konkrete Sicherheits- und allgemeine Fehlerbehebungen; **policies** =
+Policies, Gates und Privacy; **care** = konservative Repository-/Org-Pflege. Operator-Reihenfolge:
+`prs` → `issues` → `fixes` → `policies`/`care`. Vor jeder neuen Arbeitseinheit PRs und Issues
+frisch lesend prüfen. Ein
 unbekannter oder fehlgeschlagener Readback ist HOLD und niemals eine erfundene leere Liste.
 
 ### operator — vollständige Reihenfolge
 
-Nimm genau eine belegte geeignete Einheit: 1 vor 2 vor 3. Bei erstmals leerer Kategorie 1/2
-bevorzuge 3a, sofern vorhanden; danach wechsle 3a und 3b auf Basis tatsächlich belegter
-erfolgreicher Abschlüsse ab. Dringende 3a-Arbeit steht vor normaler Care. Fehlt die bevorzugte
-geeignete Kategorie, ist die andere erlaubt. Dies ist eine dokumentierte AB-Heuristik,
-kein eigenmächtig festgelegtes 2:1-Verhältnis und kein Freibrief für zusätzliche Aufgaben.
+Bearbeite alle freigegebenen geeigneten Einheiten in der Reihenfolge `prs` → `issues` → `fixes`
+→ `policies`/`care`. Der Selector liefert jeweils nur den nächsten Kandidaten; nach dessen
+Abschluss oder einmalig dokumentiertem Blocker den Zustand frisch einlesen und die nächste
+Einheit wählen. Beende den Lauf nicht nach einer Vorschau, einer Vorprüfung oder einem einzelnen
+Kandidaten, solange im angeforderten Umfang weitere unabhängige Arbeit bereitsteht. Bei erstmals
+leeren `prs`/`issues`/`fixes` bevorzuge `policies`, sofern vorhanden; danach wechsle Policies und
+Care auf Basis belegter erfolgreicher Abschlüsse ab. Dringende Policies stehen vor normaler Care.
+Dies ist eine dokumentierte AB-Heuristik und kein Freibrief für zusätzliche Aufgaben.
 
-### bot-triage — ausschließlich Kategorie 1
+### bot-triage — PR- und Issue-Triage
 
-Bearbeite PR-Triage und unabhängige Reviews. Fixes und Pflege an operator/github-maintain
-mit einem belegten Hinweis übergeben; keine Kategorien 2 oder 3 selbst übernehmen.
-Merges bleiben standardmäßig aus; alle untenstehenden unabhängigen Head-/CI-/Kontogates gelten.
+Bearbeite PR- und Issue-Triage. Für Issues nur die aktivierten `issue.add_labels`/`issue.comment`
+Aktionen und den konfigurierten Bot-Account verwenden. Formale unabhängige PR-Reviews nur über
+`pr.review`, wenn diese Aktion in `effective_enabled` steht und `publish_reviews` aktiv ist.
+Keine Fixes, Pflege oder Merges in diesem Modus; andere Arbeit mit frischem Beleg an operator/
+github-maintain übergeben.
 
-### github-maintain — ausschließlich Kategorien 2 und 3
+### github-maintain — Fixes und Pflege
 
-Konkrete Sicherheits-/allgemeine Fixes zuerst, dann 3a/3b mit derselben AB-Heuristik.
-Kategorie 1 vor neuen Einheiten frisch lesen und dem Operator melden; sie wird durch
-diese Rolle nicht selbst übernommen. Care verwendet weiter vorhandene Radar-/Claimwerkzeuge,
+Konkrete Sicherheits-/allgemeine Fixes zuerst, dann Policies/Care mit derselben AB-Heuristik.
+PRs und Issues vor neuen Einheiten frisch lesen und dem Operator melden; Triage, Reviews und
+Merges werden durch diese Rolle nicht selbst übernommen. Care verwendet weiter vorhandene Radar-/Claimwerkzeuge,
 Policies und Fixes eigene enge Scope-Locks. Keine neue Queue, Profile, DB oder Dienste starten.
 
 ### Evidenz, Leerlauf und Wiederaufnahme
@@ -76,12 +85,16 @@ Policies und Fixes eigene enge Scope-Locks. Keine neue Queue, Profile, DB oder D
 `githubbot-core --json multi-bot-select --input SNAPSHOT.json --mode operator`
 ist eine reine deterministische Auswahl vorhandener Kandidaten, ohne Auftragsanlage,
 Persistierung oder Start. Snapshot-Vertrag: candidates mit id, exakt 40-stelliger
-lowercase Commit-revision, category prs/fixes/policies/care, status ready/blocked/done und
+lowercase Commit-revision, category prs/issues/fixes/policies/care, status ready/blocked/done und
 optional urgent (bool). processed enthält belegte blocked/done-Einträge derselben
 id/revision/category plus nichtleere evidence-Referenz. lastMaintenance verweist nur mit
 id/revision auf einen solchen erfolgreichen policies-/care-Abschluss. Der Helper prüft
 Form und exakte Bindung; die tatsächliche Belegprüfung übernimmt der aufrufende Workflow.
-Eine Auswahl, ein Fehler, HOLD oder Leerlauf ist kein Abschluss und verändert keine Historie.
+Eine Auswahl, Vorschau, ein Fehler, HOLD oder Leerlauf ist kein Abschluss und verändert keine Historie.
+Eine echte abgeschlossene Einheit braucht einen Erfolgsbeleg und unabhängigen Readback jeder
+Mutation: Issue-Labels/-Kommentare, PR-Review, Fix-PR und Merge jeweils passend zur Aktion.
+Nach Abschluss oder Blocker Kandidatenlisten neu laden; einen unveränderten Blocker nicht in
+jeder Runde erneut bearbeiten, aber andere freigegebene Kandidaten weiterbearbeiten.
 
 Bereits belegte blocked/done-Kandidaten am gleichen exakten Head nicht immer wieder als
 neue Prio-1-Arbeit zurückholen. Neue Heads werden erneut geprüft; eine belegte Auflösung
@@ -94,7 +107,7 @@ Wenn keine geeignete Einheit bereitsteht: 60 Sekunden Leerlauf-Cooldown, keine h
 Schleife oder neuen Modellstarts. STOP auch während des Wartens regelmäßig lokal prüfen
 und bei Fund geordnet abbrechen. Kontingent vor jeder neuen Einheit und nach Wartephasen
 frisch prüfen; fehlende Telemetrie sperrt neue Starts. Zwei leere Prüfungen drehen den
-3a/3b-Zeiger nicht weiter. Nach Warten Kategorie 1 erneut frisch prüfen.
+3a/3b-Zeiger nicht weiter. Nach Warten PR- und Issue-Listen erneut frisch prüfen.
 
 ## Begrenzte Legacy-Abläufe
 
@@ -137,8 +150,8 @@ keinen Draft und `mergeable_state = clean`, prüft das Merge-Konto, merged sha-g
 Admin-Bypass und liest das Ergebnis zurück. Kein `gh pr merge`, kein `--admin`/`--auto`.
 Wo Branch-Schutz zusätzliche Approvals verlangt, diesen normal erfüllen.
 
-Merges sind standardmäßig deaktiviert. Nur die ausdrücklich autorisierte Instanzkonfiguration
-darf sie aktivieren (`multi_bot.merge_enabled = true` in `config/orgs.json` oder einem
+Im neutralen Paketstandard sind Merges deaktiviert. Nur die ausdrücklich autorisierte
+Instanzkonfiguration darf sie aktivieren (`multi_bot.merge_enabled = true` in `config/orgs.json` oder einem
 expliziten lokalen Instanzprompt). Das Zweitmodell nutzt das dort konfigurierte Merge-Konto
 (`multi_bot.merge_account`, alternativ `MULTIBOT_MERGE_ACCOUNT`); ohne Kontonamen HOLD.
 Token ausschließlich über die konfigurierte Laufzeitumgebung als `GH_TOKEN` für den
@@ -207,11 +220,14 @@ und ersetzen weder Merge-Opt-in noch Identitätsprüfung.
   ab; angestoßen wird immer über GitHub. Bleibt ein Job länger als eine Runde `queued` oder
   „Waiting for a runner“, ist das HOLD (Runner offline?) mit Ticket, nie grün. Lokale Läufe
   auf dem Runner-Host sind Prüfbelege für Reviews, aber keine Checks; keine Commit-Status setzen.
-- `publish_reviews` (bool): erlaubt Reviews, Review-Kommentare, Triage-Kommentare und Labels an
-  PRs und Issues der konfigurierten Owner. Inhalt: exakter Head, tatsächliches Modell,
-  Prüfumfang (gelesen/nicht gelesen), Testergebnis mit Befehl, Befunde mit Datei und Zeile.
-  Ein Beitrag pro (PR, Head); keine Secrets, keine lokalen Pfade. Ohne diesen Schalter bleibt
-  das Ergebnis im Bericht.
+- `publish_reviews` (bool): erlaubt formale PR-Reviews über die getypte Aktion `pr.review` an
+  PRs der konfigurierten Owner. Der Review bindet sich an den exakten Head und wird als
+  GitHub-Review mit `COMMENT`, `APPROVE` oder `REQUEST_CHANGES` gelesen zurück. Inhalt: SHA,
+  tatsächliches Modell, Prüfumfang (gelesen/nicht gelesen), echte Testergebnisse und Befunde
+  mit Datei/Zeile. Ein Review pro (PR, Head); keine Secrets oder lokalen Pfade. Ohne Schalter
+  bleibt das Ergebnis im Bericht. `issue.comment` und `issue.add_labels` sind getrennte
+  Triage-Aktionen und brauchen ihre eigene effektive Core-Berechtigung sowie die konfigurierte
+  Account-Identität; ein Issue-Kommentar ist kein formaler PR-Review.
 - `open_fix_prs` (bool): erlaubt Fix-Branches zu pushen (Core-Aktion `git.push_branch`: nur
   Bot-Präfix `typed_actions.push_branch_prefix`, nie Default-Branch, nie Force) und PRs zu
   öffnen (`pr.create`, Base immer der Default-Branch). Ohne diesen Schalter bleiben Fixes lokal
@@ -227,9 +243,12 @@ Care-/Probe-Helfer benutzen den ausdrücklich gewählten `--root`, standardmäß
 Verzeichnis. Ihre Dateikonventionen (`config/orgs.json`, `config/repo_registry.json`, Hostlogs)
 müssen als Instanzdaten vorhanden sein; bei fehlendem Bestand sperren sie die Auswahl.
 Die Core-Konfiguration kommt über wiederholbares `--config PFAD`. `multi_bot` enthält
-Root, optionalen Instanzprompt, Merge-Konto, Merge-Opt-in, `policy`-Schalter und optional trusted_automation.
+Root, optionalen Instanzprompt, konfigurierten Bot-/Merge-Account, Merge-Opt-in, `policy`-Schalter und optional trusted_automation.
 Die berechnete Core-Permission-Decke bleibt bindend; ein Rollenprompt erweitert sie nicht.
 Ohne Merge-Aktionsfähigkeit/Permission keine Merge-Mutation, auch bei aktivem Merge-Opt-in.
-Jede getypte Aktion (`pr.merge`, `pr.ready`, `actions.dispatch`, `actions.rerun`, `pr.create`,
-`git.push_branch`) braucht Obergrenze, `permissions.enabled` UND ihren `multi_bot`-Schalter;
-der Startauftrag nennt das Ergebnis als `effective_enabled`. Nur diese Liste gilt.
+Jede getypte Aktion (`pr.review`, `pr.merge`, `pr.ready`, `actions.dispatch`, `actions.rerun`,
+`pr.create`, `git.push_branch`) braucht Obergrenze, `permissions.enabled` UND ihren
+`multi_bot`-Schalter; der Startauftrag nennt das Ergebnis als `effective_enabled`. Issue-Triage
+braucht ebenfalls `issue.add_labels`/`issue.comment` in `effective_enabled`; in einer MULTI-BOT-
+Instanz prüfen diese Aktionen vor dem Schreiben das konfigurierte Konto und lesen die Änderung
+zurück. Nur die tatsächlich ausgegebenen effektiven Berechtigungen gelten.

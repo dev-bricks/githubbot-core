@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 MODES = ("operator", "bot-triage", "github-maintain")
-CATEGORIES = ("prs", "fixes", "policies", "care")
+CATEGORIES = ("prs", "issues", "fixes", "policies", "care")
 
 
 def _identity(row):
@@ -77,13 +77,23 @@ def select_work(snapshot, *, mode="operator"):
         if row["status"] == "ready" and key not in known:
             ready.append(row)
     ready.sort(key=lambda row: _identity(row))
-    categories = ("prs",) if mode == "bot-triage" else CATEGORIES if mode == "operator" else CATEGORIES[1:]
+    categories = (
+        ("prs", "issues")
+        if mode == "bot-triage"
+        else CATEGORIES
+        if mode == "operator"
+        else CATEGORIES[2:]
+    )
     selected, reason = None, "no_ready_candidate"
-    for category in ("prs", "fixes"):
+    for category in ("prs", "issues", "fixes"):
         if category in categories:
             selected = next((row for row in ready if row["category"] == category), None)
             if selected:
-                reason = "fresh_pr_priority" if category == "prs" else "fixes_before_maintenance"
+                reason = {
+                    "prs": "fresh_pr_priority",
+                    "issues": "fresh_issue_priority",
+                    "fixes": "fixes_before_maintenance",
+                }[category]
                 break
     if selected is None and "policies" in categories:
         selected = next((row for row in ready if row["category"] == "policies" and row.get("urgent", False)), None)
@@ -109,6 +119,6 @@ def select_work(snapshot, *, mode="operator"):
         "candidate": dict(selected) if selected else None,
         "revision_key": "@".join(_identity(selected)) if selected else None,
         "reason": reason,
-        "next_check": "prs",
+        "next_check": "triage",
         "idle_cooldown_seconds": 60,
     }

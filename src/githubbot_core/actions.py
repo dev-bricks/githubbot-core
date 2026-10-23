@@ -77,15 +77,75 @@ def preview(actions: list[Action], config: dict) -> dict:
 
 
 def _exec_add_labels(transport, params: dict, config: dict):
-    return transport.request(
+    if "multi_bot" not in config:
+        return transport.request(
+            "POST",
+            f"repos/{params['repo']}/issues/{int(params['number'])}/labels",
+            {"labels": list(params["labels"])},
+        )
+    _, error = _require_multibot_identity(transport, config)
+    if error:
+        return None, error
+    _, error = transport.request(
         "POST", f"repos/{params['repo']}/issues/{int(params['number'])}/labels", {"labels": list(params["labels"])}
     )
+    if error:
+        return None, error
+    issue, error = transport.get(f"repos/{params['repo']}/issues/{int(params['number'])}")
+    if error or not isinstance(issue, dict):
+        return None, f"labels submitted, but issue readback failed: {error or 'no issue data'}"
+    if issue.get("number") != int(params["number"]):
+        return None, "labels submitted, but issue readback returned a different issue"
+    labels = {str(label.get("name", "")) for label in issue.get("labels", []) if isinstance(label, dict)}
+    requested = {str(label) for label in params["labels"]}
+    if not requested <= labels:
+        return None, "labels submitted, but issue readback did not confirm every requested label"
+    return {"readback": {"number": int(params["number"]), "labels": sorted(requested)}}, None
 
 
 def _exec_comment(transport, params: dict, config: dict):
-    return transport.request(
+    if "multi_bot" not in config:
+        return transport.request(
+            "POST",
+            f"repos/{params['repo']}/issues/{int(params['number'])}/comments",
+            {"body": str(params["body"])},
+        )
+    _, error = _require_multibot_identity(transport, config)
+    if error:
+        return None, error
+    created, error = transport.request(
         "POST", f"repos/{params['repo']}/issues/{int(params['number'])}/comments", {"body": str(params["body"])}
     )
+    if error or not isinstance(created, dict) or not str(created.get("id", "")).isdecimal():
+        return None, error or "comment submitted, but create response has no numeric id"
+    comment_id = int(created["id"])
+    comment, error = transport.get(f"repos/{params['repo']}/issues/comments/{comment_id}")
+    if error or not isinstance(comment, dict):
+        return None, f"comment submitted, but comment readback failed: {error or 'no comment data'}"
+    if comment.get("body") != str(params["body"]):
+        return None, "comment submitted, but readback body did not match"
+    if not str(comment.get("issue_url", "")).endswith(f"/issues/{int(params['number'])}"):
+        return None, "comment submitted, but readback issue did not match the requested issue"
+    expected_account = str((config.get("multi_bot") or {}).get("merge_account") or "").strip()
+    if expected_account and str((comment.get("user") or {}).get("login", "")).casefold() != expected_account.casefold():
+        return None, "comment submitted, but readback author did not match the configured account"
+    return {"readback": {"comment_id": comment_id, "number": int(params["number"]), "url": comment.get("html_url")}}, None
+
+
+def _require_multibot_identity(transport, config: dict):
+    """Bind MULTI-BOT issue writes to its configured account; leave generic triage unchanged."""
+    if "multi_bot" not in config:
+        return None, None
+    settings = config.get("multi_bot")
+    if not isinstance(settings, dict):
+        return None, "multi_bot configuration must be an object"
+    expected = str(settings.get("merge_account") or "").strip()
+    if not expected:
+        return None, "multi_bot.merge_account is required for issue writes"
+    user, error = transport.get("user")
+    if error or not isinstance(user, dict) or str(user.get("login", "")).casefold() != expected.casefold():
+        return None, f"identity does not match the configured MULTI-BOT account {expected!r}"
+    return user, None
 
 
 def _exec_api_request(transport, params: dict, config: dict):

@@ -429,8 +429,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_apply_flags(p)
     p.set_defaults(func=cmd_run)
 
-    p = sub.add_parser("act", help="preview or apply one typed write action (pr.merge, pr.ready, ...)")
-    p.add_argument("kind", help="action kind, for example pr.merge")
+    p = sub.add_parser("act", help="preview or apply one typed write action (pr.review, pr.merge, ...)")
+    p.add_argument("kind", help="action kind, for example pr.review")
     p.add_argument(
         "--params", required=True, help='JSON object, for example {"repo": "o/r", "number": 1, "sha": "..."}'
     )
