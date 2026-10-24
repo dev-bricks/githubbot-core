@@ -35,8 +35,17 @@ def config(*, enabled=True, publish=True, account="example-bot"):
 
 
 def action(**overrides):
-    return Action("pr.review", {"repo": REPO, "number": 7, "sha": SHA, "event": "APPROVE",
-                                "body": "Complete independent review; tests passed.", **overrides})
+    return Action(
+        "pr.review",
+        {
+            "repo": REPO,
+            "number": 7,
+            "sha": SHA,
+            "event": "APPROVE",
+            "body": "Complete independent review; tests passed.",
+            **overrides,
+        },
+    )
 
 
 class Transport:
@@ -71,8 +80,13 @@ class Transport:
     def request(self, method, endpoint, body):
         assert (method, endpoint) == ("POST", f"{ENDPOINT}/reviews")
         self.writes.append((method, endpoint, body))
-        self.created = {"id": self.id, "commit_id": body["commit_id"], "body": body["body"],
-                        "state": STATES[body["event"]], "user": {"login": self.login}}
+        self.created = {
+            "id": self.id,
+            "commit_id": body["commit_id"],
+            "body": body["body"],
+            "state": STATES[body["event"]],
+            "user": {"login": self.login},
+        }
         # A timed-out POST can have created a real review. Subsequent calls must discover it.
         self.reviews.append(copy.deepcopy(self.created))
         return self.created, self.write_error
@@ -94,11 +108,23 @@ def test_review_requires_permission_and_policy_and_never_runs_from_preview():
     assert actions.denial_reason(review, {"permissions": {"enabled": ["pr.review"], "ceiling": []}})
 
 
-@pytest.mark.parametrize("overrides", [
-    {"sha": "short"}, {"sha": OTHER.upper()}, {"number": 0}, {"number": -1},
-    {"repo": "../wrong/repo"}, {"event": "PENDING"}, {"event": "approve"}, {"event": []},
-    {"body": " "}, {"body": None}, {"body": {}}, {"body": "x" * 65537},
-])
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"sha": "short"},
+        {"sha": OTHER.upper()},
+        {"number": 0},
+        {"number": -1},
+        {"repo": "../wrong/repo"},
+        {"event": "PENDING"},
+        {"event": "approve"},
+        {"event": []},
+        {"body": " "},
+        {"body": None},
+        {"body": {}},
+        {"body": "x" * 65537},
+    ],
+)
 def test_invalid_review_parameters_are_denied_without_api_calls(overrides):
     transport = Transport()
     receipt = apply(transport, action(**overrides))
@@ -112,16 +138,26 @@ def test_formal_review_is_submitted_at_the_exact_sha_and_independently_read_back
     review = action(event=event, body="Geprüft: Änderungen vollständig gelesen.")
     receipt = apply(transport, review)
     assert receipt["status"] == "applied"
-    assert transport.writes == [("POST", f"{ENDPOINT}/reviews", {
-        "commit_id": SHA, "event": event, "body": review.params["body"]})]
+    assert transport.writes == [
+        ("POST", f"{ENDPOINT}/reviews", {"commit_id": SHA, "event": event, "body": review.params["body"]})
+    ]
     assert receipt["readback"] == {"review_id": 81, "head": SHA, "state": state, "account": "example-bot"}
     assert f"{ENDPOINT}/reviews/81" in transport.reads
 
 
-@pytest.mark.parametrize("pull", [
-    {"state": "closed"}, {"head": {"sha": OTHER}}, {"head": None}, {"draft": True},
-    {"user": {"login": "Example-Bot"}}, {"user": None}, {"user": {"login": ""}}, {"draft": None},
-])
+@pytest.mark.parametrize(
+    "pull",
+    [
+        {"state": "closed"},
+        {"head": {"sha": OTHER}},
+        {"head": None},
+        {"draft": True},
+        {"user": {"login": "Example-Bot"}},
+        {"user": None},
+        {"user": {"login": ""}},
+        {"draft": None},
+    ],
+)
 def test_approval_refuses_unreviewed_closed_draft_or_own_pr(pull):
     transport = Transport()
     transport.pull.update(pull)
@@ -144,11 +180,14 @@ def test_review_requires_the_configured_account():
     assert not transport.writes
 
 
-@pytest.mark.parametrize("existing", [
-    {"id": 12, "user": {"login": "example-bot"}, "commit_id": SHA, "state": "APPROVED"},
-    {"id": 13, "user": {"login": "Example-Bot"}, "commit_id": SHA, "state": "PENDING"},
-    {"id": 14, "user": None, "commit_id": SHA},
-])
+@pytest.mark.parametrize(
+    "existing",
+    [
+        {"id": 12, "user": {"login": "example-bot"}, "commit_id": SHA, "state": "APPROVED"},
+        {"id": 13, "user": {"login": "Example-Bot"}, "commit_id": SHA, "state": "PENDING"},
+        {"id": 14, "user": None, "commit_id": SHA},
+    ],
+)
 def test_existing_or_unreadable_reviews_prevent_a_second_write(existing):
     transport = Transport()
     transport.reviews = [existing]
@@ -158,8 +197,10 @@ def test_existing_or_unreadable_reviews_prevent_a_second_write(existing):
 
 def test_reviews_on_old_heads_or_from_other_actors_do_not_block():
     transport = Transport()
-    transport.reviews = [{"user": {"login": "example-bot"}, "commit_id": OTHER},
-                         {"user": {"login": "other-reviewer"}, "commit_id": SHA}]
+    transport.reviews = [
+        {"user": {"login": "example-bot"}, "commit_id": OTHER},
+        {"user": {"login": "other-reviewer"}, "commit_id": SHA},
+    ]
     assert apply(transport)["status"] == "applied"
 
 
@@ -194,10 +235,17 @@ def test_head_moving_during_pagination_prevents_post():
     assert not transport.writes
 
 
-@pytest.mark.parametrize("override", [
-    {"commit_id": OTHER}, {"body": "different"}, {"state": "PENDING"}, {"id": 82},
-    {"user": {"login": "another"}}, {"user": None},
-])
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"commit_id": OTHER},
+        {"body": "different"},
+        {"state": "PENDING"},
+        {"id": 82},
+        {"user": {"login": "another"}},
+        {"user": None},
+    ],
+)
 def test_readback_must_match_created_review_commit_body_state_and_actor(override):
     transport = Transport()
     transport.readback_override = override
