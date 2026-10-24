@@ -9,7 +9,7 @@ Duplikaterkennung, Pull-Request-Zusammenfassungen, lesende Berichte zu Gesundhei
 Sternen, ein Vorschau-/Ausführungsvertrag für jede Schreibaktion, eine Plugin-Schnittstelle (SPI)
 und signierte Exact-SHA-Review-Belege. Reine Python-Standardbibliothek, keine Laufzeitabhängigkeiten.
 
-> Status: Alpha (0.2.1). Verbindlich sind CLI, JSON-Ergebnishülle und SPI-Version 1; alles andere
+> Status: Alpha (0.2.2). Verbindlich sind CLI, JSON-Ergebnishülle und SPI-Version 1; alles andere
 > kann sich noch ändern.
 
 ## Funktionen

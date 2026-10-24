@@ -9,7 +9,7 @@ pull-request summaries, read-only health/traffic/star reports, a preview/apply c
 write, a plugin SPI and signed exact-SHA review receipts. Pure Python standard library, no runtime
 dependencies.
 
-> Status: alpha (0.2.1). The CLI, the JSON result envelope and SPI version 1 are the contract;
+> Status: alpha (0.2.2). The CLI, the JSON result envelope and SPI version 1 are the contract;
 > everything else may still change.
 
 ## Features

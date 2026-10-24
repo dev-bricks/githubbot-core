@@ -35,6 +35,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 - README (EN/DE) mit Banner (`assets/banner.png`, Quelle `assets/banner.svg`); Testkommentar
   neutral formuliert / README banner added; a test comment worded neutrally.
 
+- `pr.review` liest nach dem Dublettencheck den PR-Zustand erneut und verweigert einen
+  zwischenzeitlich geänderten Head oder eine inzwischen als Draft markierte PR vor dem POST. Bestehende Reviews desselben Kontos
+  am selben Head, auch `DISMISSED`, verhindern ein erneutes POST. / After the duplicate
+  lookup, `pr.review` re-reads the PR and denies an observed head or draft change before
+  POST. Existing reviews by the same account for the same head, including `DISMISSED`,
+  prevent reposting.
+
 ## [0.2.1] - 2026-10-11
 
 ### Geändert / Changed

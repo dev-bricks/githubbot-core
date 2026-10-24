@@ -5,4 +5,4 @@ detection, pull-request summaries, a preview/apply contract for every write,
 a plugin SPI and signed exact-SHA review receipts. Standard library only.
 """
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
