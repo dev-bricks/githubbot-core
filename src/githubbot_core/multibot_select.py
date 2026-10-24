@@ -77,13 +77,7 @@ def select_work(snapshot, *, mode="operator"):
         if row["status"] == "ready" and key not in known:
             ready.append(row)
     ready.sort(key=lambda row: _identity(row))
-    categories = (
-        ("prs", "issues")
-        if mode == "bot-triage"
-        else CATEGORIES
-        if mode == "operator"
-        else CATEGORIES[2:]
-    )
+    categories = ("prs", "issues") if mode == "bot-triage" else CATEGORIES if mode == "operator" else CATEGORIES[2:]
     selected, reason = None, "no_ready_candidate"
     for category in ("prs", "issues", "fixes"):
         if category in categories:

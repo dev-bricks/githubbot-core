@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from . import typed_actions
+from .repo_scope import review_write_scope_denial
 
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -57,6 +58,10 @@ def denial_reason(action: Action, config: dict) -> Optional[str]:
     )
     if reason:
         return reason
+    if action.kind == "pr.review":
+        reason = review_write_scope_denial(action.params.get("repo"), config)
+        if reason:
+            return reason
     if action.kind == "api.request":
         method = str(action.params.get("method", "")).upper()
         endpoint = str(action.params.get("endpoint", "")).lstrip("/")
@@ -129,7 +134,9 @@ def _exec_comment(transport, params: dict, config: dict):
     expected_account = str((config.get("multi_bot") or {}).get("merge_account") or "").strip()
     if expected_account and str((comment.get("user") or {}).get("login", "")).casefold() != expected_account.casefold():
         return None, "comment submitted, but readback author did not match the configured account"
-    return {"readback": {"comment_id": comment_id, "number": int(params["number"]), "url": comment.get("html_url")}}, None
+    return {
+        "readback": {"comment_id": comment_id, "number": int(params["number"]), "url": comment.get("html_url")}
+    }, None
 
 
 def _require_multibot_identity(transport, config: dict):

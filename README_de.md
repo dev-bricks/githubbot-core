@@ -112,7 +112,7 @@ stille Überschreibung. `permissions.enabled` muss innerhalb der Obergrenze blei
 | `issue.add_labels` | aktiv | `POST /repos/{repo}/issues/{n}/labels` |
 | `issue.comment` | aktiv | `POST /repos/{repo}/issues/{n}/comments` |
 | `api.request` | aus | beliebige Schreibmethode auf einem Endpunkt, der mit einem Eintrag aus `permissions.api_write_prefixes` beginnt |
-| `pr.review` | aus | prüft Bot-Identität, offenen Nicht-Draft-PR und exakten Head; `POST …/pulls/{n}/reviews` mit `commit_id`/Review-Ereignis, danach unabhängiger Review-Readback; zusätzlich `publish_reviews` erforderlich |
+| `pr.review` | aus | prüft Bot-Identität, offenen Nicht-Draft-PR und exakten Head; `POST …/pulls/{n}/reviews` mit `commit_id`/Review-Ereignis, danach unabhängiger Review-Readback; zusätzlich `publish_reviews` und eine aktivierte Organisation mit `pr-review`-Feature in `<runtime-root>/config/orgs.json` (`multi_bot.root`, Standard: aktuelles Verzeichnis); globale und organisationsbezogene `exclude_writes` werden durchgesetzt, eine fehlende oder ungültige Policy verweigert das Review |
 | `pr.merge` | aus | liest den PR frisch (offen, exakter `sha`, Default-Base, kein Draft, `mergeable_state` clean, konfiguriertes Merge-Konto), `PUT …/pulls/{n}/merge` mit `sha`, liest `merged` zurück |
 | `pr.ready` | aus | liest den Draft am exakten `sha` frisch, GraphQL `markPullRequestReadyForReview`, liest zurück |
 | `actions.dispatch` | aus | `POST …/actions/workflows/{workflow}/dispatches` für einen aktiven Workflow |

@@ -14,6 +14,8 @@ import re
 import subprocess
 from typing import Any, Optional
 
+from .repo_scope import review_write_scope_denial
+
 SHA = re.compile(r"[0-9a-f]{40}")
 REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}")
@@ -80,10 +82,7 @@ def param_denial(kind: str, params: dict, config: dict) -> Optional[str]:
     need_sha = kind in ("pr.review", "pr.merge", "pr.ready", "actions.rerun", "git.push_branch")
     if need_sha and not SHA.fullmatch(str(params.get("sha", ""))):
         return "sha must be the exact reviewed 40-character lowercase commit"
-    if (
-        kind in ("pr.review", "pr.merge", "pr.ready")
-        and not str(params.get("number", "")).isdecimal()
-    ):
+    if kind in ("pr.review", "pr.merge", "pr.ready") and not str(params.get("number", "")).isdecimal():
         return "number must be a pull request number"
     if kind == "pr.review":
         if params.get("event") not in REVIEW_STATES:
@@ -153,6 +152,9 @@ MERGE_READBACK_QUERY = (
 
 def exec_review(transport, params: dict, config: dict):
     """Submit one formal review for the exact current head and confirm it by readback."""
+    scope_error = review_write_scope_denial(params.get("repo"), config)
+    if scope_error:
+        return None, scope_error
     account = str((config.get("multi_bot") or {}).get("merge_account") or "")
     if not account:
         return None, "multi_bot.merge_account is required for published pull request reviews"
@@ -185,11 +187,12 @@ def exec_review(transport, params: dict, config: dict):
     ):
         return None, "this account already submitted a review for this exact head; read it back instead of duplicating"
 
+    scope_error = review_write_scope_denial(repo, config)
+    if scope_error:
+        return None, scope_error
     event = params["event"]
     endpoint = f"repos/{repo}/pulls/{number}/reviews"
-    created, error = transport.request(
-        "POST", endpoint, {"commit_id": sha, "event": event, "body": params["body"]}
-    )
+    created, error = transport.request("POST", endpoint, {"commit_id": sha, "event": event, "body": params["body"]})
     if error or not isinstance(created, dict) or not str(created.get("id", "")).isdecimal():
         return None, error or "review not confirmed by create response"
     review_id = int(created["id"])
