@@ -122,7 +122,6 @@ def _load_policy(path: Path) -> tuple[dict[str, dict], list[str]]:
             raise _PolicyError(f"{prefix}.type must be organization or personal")
         if type(row.get("enabled")) is not bool:
             raise _PolicyError(f"{prefix}.enabled must be a boolean")
-        features = _string_list(row.get("features"), f"{prefix}.features")
         exclusions = []
         if "exclude_writes" in row:
             exclusions = [
@@ -133,7 +132,6 @@ def _load_policy(path: Path) -> tuple[dict[str, dict], list[str]]:
             "name": name,
             "type": namespace_type,
             "enabled": row["enabled"],
-            "features": features,
             "exclude_writes": exclusions,
         }
     return organizations, global_exclusions
@@ -167,8 +165,6 @@ def review_write_scope_denial(repo: object, config: dict) -> Optional[str]:
         return f"review write scope denies non-organization namespace {owner!r}"
     if not namespace["enabled"]:
         return f"review write scope denies disabled organization {owner!r}"
-    if "pr-review" not in namespace["features"]:
-        return f"review write scope denies organization {owner!r} without the pr-review feature"
     if name_key in namespace["exclude_writes"] or full_key in namespace["exclude_writes"]:
         return f"review write scope denies organization-excluded repository {repo!r}"
     return None

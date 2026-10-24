@@ -110,7 +110,7 @@ not a silent override. `permissions.enabled` must stay inside the ceiling.
 | `issue.add_labels` | enabled | `POST /repos/{repo}/issues/{n}/labels` |
 | `issue.comment` | enabled | `POST /repos/{repo}/issues/{n}/comments` |
 | `api.request` | disabled | any write method on an endpoint that starts with one of `permissions.api_write_prefixes` |
-| `pr.review` | disabled | verifies bot identity, open non-draft PR and exact head; `POST …/pulls/{n}/reviews` with `commit_id` and review event, then reads the formal review back; also requires `publish_reviews` and an enabled organization with the `pr-review` feature in `<runtime-root>/config/orgs.json` (`multi_bot.root`, default: current directory); global and organization `exclude_writes` are enforced, and a missing or invalid policy denies the review |
+| `pr.review` | disabled | verifies bot identity, open non-draft PR and exact head; `POST …/pulls/{n}/reviews` with `commit_id` and review event, then reads the formal review back; also requires `publish_reviews` and a configured enabled organization in `<runtime-root>/config/orgs.json` (`multi_bot.root`, default: current directory); global and organization `exclude_writes` are enforced, and a missing or invalid policy denies the review |
 | `pr.merge` | disabled | re-reads the PR (open, exact `sha`, default base, not draft, `mergeable_state` clean, configured merge account), `PUT …/pulls/{n}/merge` with `sha`, reads `merged` back |
 | `pr.ready` | disabled | re-reads the draft at the exact `sha`, GraphQL `markPullRequestReadyForReview`, reads back |
 | `actions.dispatch` | disabled | `POST …/actions/workflows/{workflow}/dispatches` for an active workflow |

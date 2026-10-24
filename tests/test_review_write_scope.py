@@ -22,7 +22,7 @@ def orgs_document():
                 "name": "research-line",
                 "type": "organization",
                 "enabled": True,
-                "features": ["pr-review"],
+                "features": ["triage", "duplicates", "traffic", "stars", "health"],
                 "exclude_writes": ["fst-nash"],
             },
             {
@@ -157,10 +157,10 @@ def test_configured_exclusions_block_preview_apply_direct_execution_and_replay(t
     assert transport.calls == []
 
 
-def test_allowed_control_repo_submits_exact_head_review_via_fake_transport(tmp_path):
+def test_configured_org_without_legacy_pr_review_feature_can_submit_via_fake_transport(tmp_path):
     write_orgs(tmp_path)
     config = review_config(tmp_path)
-    action = review_action("dev-bricks/githubbot-core")
+    action = review_action("research-line/unexcluded-control")
     transport = FakeTransport()
 
     assert actions.preview([action], config)["actions"][0]["permitted"] is True
@@ -171,7 +171,7 @@ def test_allowed_control_repo_submits_exact_head_review_via_fake_transport(tmp_p
     assert [call for call in transport.calls if call[0] == "POST"] == [
         (
             "POST",
-            "repos/dev-bricks/githubbot-core/pulls/7/reviews",
+            "repos/research-line/unexcluded-control/pulls/7/reviews",
             {"commit_id": SHA, "event": "COMMENT", "body": "Independent review receipt."},
         )
     ]
@@ -204,11 +204,6 @@ def test_scope_is_reloaded_immediately_before_review_post(tmp_path):
     [
         ("unknown-org/repo", None, "unknown namespace"),
         ("lukisch/repo", None, "non-organization"),
-        (
-            "research-line/other",
-            lambda doc: doc["organizations"][0]["features"].remove("pr-review"),
-            "without the pr-review",
-        ),
         ("dev-bricks/repo", lambda doc: doc["organizations"][1].update(enabled=False), "disabled organization"),
     ],
 )
