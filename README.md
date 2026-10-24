@@ -112,19 +112,36 @@ not a silent override. `permissions.enabled` must stay inside the ceiling.
 | `api.request` | disabled | any write method on an endpoint that starts with one of `permissions.api_write_prefixes` |
 | `pr.merge` | disabled | re-reads the PR (open, exact `sha`, default base, not draft, `mergeable_state` clean, configured merge account), `PUT …/pulls/{n}/merge` with `sha`, reads `merged` back |
 | `pr.ready` | disabled | re-reads the draft at the exact `sha`, GraphQL `markPullRequestReadyForReview`, reads back |
+| `pr.review` | disabled | submits `COMMENT`, `APPROVE` or `REQUEST_CHANGES` to `POST …/pulls/{n}/reviews` with mandatory `sha`/body; requires the configured account and reads review ID, actor, commit, body and state back |
 | `actions.dispatch` | disabled | `POST …/actions/workflows/{workflow}/dispatches` for an active workflow |
 | `actions.rerun` | disabled | `POST …/actions/runs/{id}/rerun` for a completed, non-fork run of the exact `sha` |
 | `pr.create` | disabled | `POST …/pulls` from a bot-prefixed branch onto the default branch |
 | `git.push_branch` | disabled | `git push origin <sha>:refs/heads/<branch>` without force, bot prefix only (`typed_actions.push_branch_prefix`, default `bot/`), never the default branch, verified with `ls-remote` |
 
-The six typed actions sit in the default ceiling but are never enabled by default. Each one also
+The seven typed actions sit in the default ceiling but are never enabled by default. Each one also
 needs its `multi_bot` switch (`merge_enabled`, `policy.draft_*`, `policy.trigger_missing_ci`,
-`policy.open_fix_prs`); a permission alone opens nothing. One action at a time:
+`policy.open_fix_prs`, `policy.publish_reviews`); a permission alone opens nothing. One action at a time:
 
 ```bash
 githubbot-core --config instance.json act pr.merge --params '{"repo": "o/r", "number": 7, "sha": "<40-hex>"}'
 githubbot-core --config instance.json act pr.merge --params '…' --apply --expect-plan <plan_sha256>
 ```
+
+Formal reviews require an explicit instance opt-in, for example
+`{"permissions":{"enabled":["pr.review"]},"multi_bot":{"merge_account":"example-bot","policy":{"publish_reviews":true}}}`.
+Then preview `act pr.review --params '{"repo":"o/r","number":7,"sha":"<40-hex>","event":"COMMENT","body":"Review scope and evidence"}'`
+and apply that exact plan. Unlike `issue.comment`, this creates a submitted GitHub review.
+An omitted event or empty body is refused; inline comments and pending reviews are not supported.
+The [GitHub review API](https://docs.github.com/en/rest/pulls/reviews#create-a-review-for-a-pull-request)
+binds the review to `commit_id`. Core additionally reads the head before and after publishing.
+Drafts accept only `COMMENT`; stacked PRs can be reviewed without relaxing merge gates.
+An existing review by this account at the same head prevents another POST, including after an
+ambiguous timeout. A failed post/readback may already have created a review: inspect the reported
+review ID or list before retrying. Concurrent publishers still need shared scope locks; this is
+not an atomic server-side uniqueness guarantee. Full diff inspection, author-instance independence,
+scope locks and review evidence remain the caller's responsibility. Account self-approval/change
+requests are refused, but a different GitHub account alone does not prove an independent session.
+Installing this capability does not enable it; existing instance configurations remain unchanged.
 
 ```json
 {"permissions": {"enabled": ["issue.add_labels", "issue.comment", "api.request"],

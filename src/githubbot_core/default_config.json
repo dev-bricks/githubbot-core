@@ -10,6 +10,7 @@
       "api.request",
       "pr.merge",
       "pr.ready",
+      "pr.review",
       "actions.dispatch",
       "actions.rerun",
       "pr.create",
