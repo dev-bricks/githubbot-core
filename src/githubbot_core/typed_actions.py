@@ -1,11 +1,11 @@
-"""Narrow, typed write actions for pull requests, CI runs and bot branches.
+"""Narrow, typed write actions for reviews, pull requests, CI runs and bot branches.
 
 ``api.request`` can only be scoped by endpoint prefix, which is far too coarse for
-merges (``repos/<owner>/`` would allow every write in every repository). These
-actions each do exactly one thing, re-read the target before writing, refuse when
-the reviewed head moved, and read the result back. They are in the default ceiling
-but never in the default ``enabled`` list, and every kind is additionally gated by
-its ``multi_bot`` switch, so a permission alone opens nothing.
+reviews and merges (``repos/<owner>/`` would allow every write in every repository).
+These actions each do exactly one thing, re-read the target before writing, refuse
+when the reviewed head moved, and read the result back. They are in the default
+ceiling but never in the default ``enabled`` list, and every kind is additionally
+gated by its ``multi_bot`` switch, so a permission alone opens nothing.
 """
 
 from __future__ import annotations
@@ -14,14 +14,29 @@ import re
 import subprocess
 from typing import Any, Optional
 
+from .repo_scope import review_write_scope_denial
+
 SHA = re.compile(r"[0-9a-f]{40}")
 REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}")
 WORKFLOW = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml|[0-9]+")
 MERGE_METHODS = ("merge", "squash", "rebase")
+REVIEW_STATES = {
+    "COMMENT": "COMMENTED",
+    "APPROVE": "APPROVED",
+    "REQUEST_CHANGES": "CHANGES_REQUESTED",
+}
 DEFAULT_PUSH_PREFIX = "bot/"
 
-KINDS = ("pr.merge", "pr.ready", "actions.dispatch", "actions.rerun", "pr.create", "git.push_branch")
+KINDS = (
+    "pr.review",
+    "pr.merge",
+    "pr.ready",
+    "actions.dispatch",
+    "actions.rerun",
+    "pr.create",
+    "git.push_branch",
+)
 
 _git = subprocess.run  # replaced in tests
 
@@ -42,6 +57,7 @@ def switch_denial(kind: str, config: dict) -> Optional[str]:
     except ValueError as exc:
         return f"multi_bot.policy invalid: {exc}"
     allowed = {
+        "pr.review": policy["publish_reviews"],
         "pr.merge": policy["merge_enabled"],
         "pr.ready": policy["draft_auto_ready_hours"] is not None or policy["draft_ready_when_mature"],
         "actions.dispatch": policy["trigger_missing_ci"],
@@ -63,11 +79,16 @@ def param_denial(kind: str, params: dict, config: dict) -> Optional[str]:
         return None
     if not REPO.fullmatch(str(params.get("repo", ""))):
         return "repo must be owner/name"
-    need_sha = kind in ("pr.merge", "pr.ready", "actions.rerun", "git.push_branch")
+    need_sha = kind in ("pr.review", "pr.merge", "pr.ready", "actions.rerun", "git.push_branch")
     if need_sha and not SHA.fullmatch(str(params.get("sha", ""))):
         return "sha must be the exact reviewed 40-character lowercase commit"
-    if kind in ("pr.merge", "pr.ready") and not str(params.get("number", "")).isdecimal():
+    if kind in ("pr.review", "pr.merge", "pr.ready") and not str(params.get("number", "")).isdecimal():
         return "number must be a pull request number"
+    if kind == "pr.review":
+        if params.get("event") not in REVIEW_STATES:
+            return f"event must be one of {list(REVIEW_STATES)}"
+        if not isinstance(params.get("body"), str) or not params["body"].strip():
+            return "a non-empty review body is required"
     if kind == "pr.merge" and params.get("method", "merge") not in MERGE_METHODS:
         return f"method must be one of {list(MERGE_METHODS)}"
     if kind == "actions.dispatch":
@@ -104,6 +125,22 @@ def _pull(transport, repo: str, number) -> tuple[dict, Optional[str]]:
     return data, None
 
 
+def _reviewable_pull(transport, repo: str, number, sha: str, account: str) -> tuple[dict, Optional[str]]:
+    """Require the exact open, non-draft head and a non-self author."""
+    pull, error = _pull(transport, repo, number)
+    if error:
+        return {}, error
+    if pull.get("state") != "open":
+        return {}, "pull request is not open"
+    if (pull.get("head") or {}).get("sha") != sha:
+        return {}, "head moved since review (sha mismatch); nothing written"
+    if pull.get("draft") is not False:
+        return {}, "draft pull request or draft state is not explicitly false; do not submit a formal review"
+    if str((pull.get("user") or {}).get("login") or "").casefold() == account.casefold():
+        return {}, "the configured review account authored this pull request"
+    return pull, None
+
+
 def _reviewed_pull(transport, params: dict, *, draft: bool) -> tuple[dict, Optional[str]]:
     """Fresh read: open, unstacked, exact reviewed head, expected draft state."""
     repo, sha = params["repo"], params["sha"]
@@ -127,6 +164,77 @@ def _reviewed_pull(transport, params: dict, *, draft: bool) -> tuple[dict, Optio
 MERGE_READBACK_QUERY = (
     "query($id: ID!) { node(id: $id) { ... on PullRequest { state headRefOid mergeCommit { oid } } } }"
 )
+
+
+def exec_review(transport, params: dict, config: dict):
+    """Submit one formal review for the exact current head and confirm it by readback."""
+    scope_error = review_write_scope_denial(params.get("repo"), config)
+    if scope_error:
+        return None, scope_error
+    account = str((config.get("multi_bot") or {}).get("merge_account") or "")
+    if not account:
+        return None, "multi_bot.merge_account is required for published pull request reviews"
+    user, error = transport.get("user")
+    if error or str((user or {}).get("login", "")).casefold() != account.casefold():
+        return None, f"identity is not the configured review account {account!r}"
+
+    repo, number, sha = params["repo"], int(params["number"]), params["sha"]
+    pull, error = _reviewable_pull(transport, repo, number, sha, account)
+    if error:
+        return None, error
+
+    reviews, error = transport.get_paginated(f"repos/{repo}/pulls/{number}/reviews")
+    if error or not isinstance(reviews, list):
+        return None, f"existing reviews unreadable: {error or 'no data'}"
+    if any(
+        item.get("commit_id") == sha and str((item.get("user") or {}).get("login", "")).casefold() == account.casefold()
+        for item in reviews
+        if isinstance(item, dict)
+    ):
+        return None, "this account already submitted a review for this exact head; read it back instead of duplicating"
+
+    pull, error = _reviewable_pull(transport, repo, number, sha, account)
+    if error:
+        return None, error
+
+    event = params["event"]
+    endpoint = f"repos/{repo}/pulls/{number}/reviews"
+    body = {"commit_id": sha, "event": event, "body": params["body"]}
+    scope_error = review_write_scope_denial(repo, config)
+    if scope_error:
+        return None, scope_error
+    created, error = transport.request("POST", endpoint, body)
+    if error or not isinstance(created, dict) or not str(created.get("id", "")).isdecimal():
+        return None, error or "review not confirmed by create response"
+    review_id = int(created["id"])
+
+    review, error = transport.get(f"{endpoint}/{review_id}")
+    if error or not isinstance(review, dict):
+        return None, f"review not confirmed by readback: {error or 'no data'}"
+    if (
+        review.get("commit_id") != sha
+        or review.get("state") != REVIEW_STATES[event]
+        or str((review.get("user") or {}).get("login", "")).casefold() != account.casefold()
+        or review.get("body") != params["body"]
+    ):
+        return None, "review readback does not match the requested account, head or event"
+    after, error = _pull(transport, repo, number)
+    if (
+        error
+        or after.get("state") != "open"
+        or (after.get("head") or {}).get("sha") != sha
+        or after.get("draft") is not False
+    ):
+        return None, "review submitted, but pull request state, head or draft changed before final readback"
+    return {
+        "readback": {
+            "review_id": review_id,
+            "event": event,
+            "state": review["state"],
+            "commit_id": sha,
+            "url": review.get("html_url"),
+        }
+    }, None
 
 
 def exec_merge(transport, params: dict, config: dict):
@@ -275,6 +383,7 @@ def exec_push_branch(transport, params: dict, config: dict):
 
 
 EXECUTORS: dict[str, Any] = {
+    "pr.review": exec_review,
     "pr.merge": exec_merge,
     "pr.ready": exec_ready,
     "actions.dispatch": exec_dispatch,

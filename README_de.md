@@ -9,7 +9,7 @@ Duplikaterkennung, Pull-Request-Zusammenfassungen, lesende Berichte zu Gesundhei
 Sternen, ein Vorschau-/Ausführungsvertrag für jede Schreibaktion, eine Plugin-Schnittstelle (SPI)
 und signierte Exact-SHA-Review-Belege. Reine Python-Standardbibliothek, keine Laufzeitabhängigkeiten.
 
-> Status: Alpha (0.2.1). Verbindlich sind CLI, JSON-Ergebnishülle und SPI-Version 1; alles andere
+> Status: Alpha (0.2.2). Verbindlich sind CLI, JSON-Ergebnishülle und SPI-Version 1; alles andere
 > kann sich noch ändern.
 
 ## Funktionen
@@ -112,6 +112,7 @@ stille Überschreibung. `permissions.enabled` muss innerhalb der Obergrenze blei
 | `issue.add_labels` | aktiv | `POST /repos/{repo}/issues/{n}/labels` |
 | `issue.comment` | aktiv | `POST /repos/{repo}/issues/{n}/comments` |
 | `api.request` | aus | beliebige Schreibmethode auf einem Endpunkt, der mit einem Eintrag aus `permissions.api_write_prefixes` beginnt |
+| `pr.review` | aus | prüft Bot-Identität, offenen Nicht-Draft-PR und exakten Head; `POST …/pulls/{n}/reviews` mit `commit_id`/Review-Ereignis, danach unabhängiger Review-Readback; zusätzlich `publish_reviews` und eine konfigurierte aktivierte Organisation in `<runtime-root>/config/orgs.json` (`multi_bot.root`, Standard: aktuelles Verzeichnis); globale und organisationsbezogene `exclude_writes` werden durchgesetzt, eine fehlende oder ungültige Policy verweigert das Review |
 | `pr.merge` | aus | liest den PR frisch (offen, exakter `sha`, Default-Base, kein Draft, `mergeable_state` clean, konfiguriertes Merge-Konto), `PUT …/pulls/{n}/merge` mit `sha`, liest `merged` zurück |
 | `pr.ready` | aus | liest den Draft am exakten `sha` frisch, GraphQL `markPullRequestReadyForReview`, liest zurück |
 | `actions.dispatch` | aus | `POST …/actions/workflows/{workflow}/dispatches` für einen aktiven Workflow |
@@ -119,9 +120,9 @@ stille Überschreibung. `permissions.enabled` muss innerhalb der Obergrenze blei
 | `pr.create` | aus | `POST …/pulls` von einem Branch mit Bot-Präfix auf den Default-Branch |
 | `git.push_branch` | aus | `git push origin <sha>:refs/heads/<branch>` ohne Force, nur Bot-Präfix (`typed_actions.push_branch_prefix`, Standard `bot/`), nie der Default-Branch, Prüfung per `ls-remote` |
 
-Die sechs getypten Aktionen stehen in der Standard-Obergrenze, sind aber nie standardmäßig aktiv.
-Jede braucht zusätzlich ihren `multi_bot`-Schalter (`merge_enabled`, `policy.draft_*`,
-`policy.trigger_missing_ci`, `policy.open_fix_prs`); eine Berechtigung allein öffnet nichts.
+Die sieben getypten Aktionen stehen in der Standard-Obergrenze, sind aber nie standardmäßig aktiv.
+Jede braucht zusätzlich ihren `multi_bot`-Schalter (`merge_enabled`, `policy.publish_reviews`,
+`policy.draft_*`, `policy.trigger_missing_ci`, `policy.open_fix_prs`); eine Berechtigung allein öffnet nichts.
 Eine Aktion je Aufruf:
 
 ```bash
@@ -203,7 +204,7 @@ Historie aufgebaut. Es ist kein Fremdcode enthalten; siehe
 
 ## MULTI-BOT als optionale Agentenrolle
 
-`python -m githubbot_core multi-bot` startet die paketierte Rolle über TASKPLAN. Das sichtbare Menü enthält **1 operator** (Standard), **2 bot-triage** (nur PR-Triage/Reviews) und **3 github-maintain** (Fixes und Pflege). Operator prüft vor jeder neuen Einheit frisch PRs, dann konkrete Fixes, dann Policies/Gates/Privacy und Care. Die 3a/3b-Heuristik bevorzugt anfangs Policies und wechselt nach belegten Abschlüssen; dringende Policies gehen vor normaler Care. Das Startcenter verwendet denselben CLI-Aufruf.
+`python -m githubbot_core multi-bot` startet die paketierte Rolle über TASKPLAN. Das sichtbare Menü enthält **1 operator** (Standard), **2 bot-triage** (PR- und Issue-Triage, unabhängige PR-Reviews) und **3 github-maintain** (Fixes und Pflege). Operator bearbeitet frische PRs, dann Issues, dann konkrete Fixes, danach Policies/Gates/Privacy und Care. Ein Selector-Durchlauf wählt einen Kandidaten; der Agent setzt den angeforderten Umfang mit frischen Listen fort. Vorschau allein gilt nicht als Abschluss. Merges sind im neutralen Paketstandard aus und nur über `effective_enabled` plus alle exakten Review-/CI-/Identitäts-/Branchschutz-Gates möglich. Die 3a/3b-Heuristik bevorzugt anfangs Policies und wechselt nach belegten Abschlüssen; dringende Policies gehen vor normaler Care. Das Startcenter verwendet denselben CLI-Aufruf.
 `--provider`, `--model`, `--effort` und `--mode` wählen ausdrücklich; die Provider-Ausführung
 bleibt in TASKPLAN. Fehlt dieses optionale Modul, erscheint ein Installationshinweis und
 kein Anbieter startet. `--dry-run` aktiviert TASKPLANs Trockenlauf ohne Sonde.
@@ -233,6 +234,6 @@ bleiben eigenständige, getrennte Konsumenten.
 
 Die alten benannten Flags `triage`, `review-merge`, `aftercare` bleiben mit ihrem bisherigen begrenzten Umfang verfügbar, erscheinen aber nicht im neuen Dreiermenü. Eine Rollenwahl aktiviert keine Merges und erweitert keine Permission-Decke.
 
-`githubbot-core --json multi-bot-select --input SNAPSHOT.json --mode operator` wählt deterministisch und ausschließlich lesend aus vorhandenen Kandidaten. Keine Queue, Auftragsanlage, Persistierung oder Agentenstarts. Der Snapshot enthält `candidates`, optional `processed` und `lastMaintenance`: Kandidaten brauchen `id`, exakte 40-stellige lowercase Commit-`revision`, `status` (`ready`, `blocked`, `done`), `category` (`prs`, `fixes`, `policies`, `care`) und optional `urgent` (bool). Ein `processed`-Eintrag bindet dieselben Felder an `blocked`/`done` und eine nichtleere `evidence`-Referenz; die tatsächliche Belegprüfung liegt beim Aufrufer. `lastMaintenance` ist ein `{id, revision}`-Verweis auf einen solchen erfolgreichen Policies-/Care-Abschluss. Auswahl und zwei leere Prüfungen verändern nichts. Unbekannte Werte werden abgewiesen. Neue PR-Heads kommen wieder vor Fixes/Pflege; erledigte oder blockierte gleiche Heads bleiben übersprungen, bis der zuständige Workflow neue Belege liefert. Gleichrangige Kandidaten werden nach ID und SHA sortiert.
+`githubbot-core --json multi-bot-select --input SNAPSHOT.json --mode operator` wählt deterministisch und ausschließlich lesend aus vorhandenen Kandidaten. Keine Queue, Auftragsanlage, Persistierung oder Agentenstarts. Der Snapshot enthält `candidates`, optional `processed` und `lastMaintenance`: Kandidaten brauchen `id`, exakte 40-stellige lowercase Commit-`revision`, `status` (`ready`, `blocked`, `done`), `category` (`prs`, `issues`, `fixes`, `policies`, `care`) und optional `urgent` (bool). Operator priorisiert PRs, Issues und Fixes vor Pflege; `bot-triage` nimmt PRs und Issues, `github-maintain` Fixes und Pflege. Ein `processed`-Eintrag bindet dieselben Felder an `blocked`/`done` und eine nichtleere `evidence`-Referenz; die tatsächliche Belegprüfung liegt beim Aufrufer. `lastMaintenance` ist ein `{id, revision}`-Verweis auf einen solchen erfolgreichen Policies-/Care-Abschluss. Auswahl und zwei leere Prüfungen verändern nichts. Unbekannte Werte werden abgewiesen. Exakt erledigte/blockierte Heads bleiben übersprungen, bis neue Belege den Zustand ändern. Gleichrangige Kandidaten werden nach ID und SHA sortiert.
 
 Der öffentliche ASCII-Windows-Starter trägt den Titel MULTI-BOT COMPANION, zeigt den Vordergrundbetrieb und wartet nach Erfolg, Fehler oder STOP auf eine Taste. Ausnahmen: explizites `--dry-run`, `TASKPLAN_STARTER_DRY_RUN=1` oder `MULTIBOT_NO_PAUSE=1`. Er installiert nichts und öffnet kein zusätzliches Fenster.
