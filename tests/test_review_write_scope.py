@@ -73,10 +73,14 @@ def review_action(repo):
 class FakeTransport:
     """Offline transport that records every call and never opens a socket."""
 
-    def __init__(self, *, identity=BOT, head_sha=SHA):
+    def __init__(self, *, identity=BOT, head_sha=SHA, reviews=None, after_reviews=None, after_post_pull=None):
         self.identity = identity
         self.head_sha = head_sha
         self.calls = []
+        self.reviews = [] if reviews is None else reviews
+        self.after_reviews = after_reviews
+        self.after_post_pull = after_post_pull
+        self.review_posted = False
         self.repo = "dev-bricks/githubbot-core"
         self.pull = {
             "state": "open",
@@ -98,6 +102,9 @@ class FakeTransport:
         if endpoint == "user":
             return {"login": self.identity}, None
         if endpoint.endswith("/pulls/7"):
+            if self.review_posted and self.after_post_pull is not None:
+                self.pull.update(self.after_post_pull)
+                self.after_post_pull = None
             return self.pull, None
         if endpoint.endswith("/pulls/7/reviews/23"):
             return self.review, None
@@ -105,11 +112,14 @@ class FakeTransport:
 
     def get_paginated(self, endpoint):
         self.calls.append(("GET_PAGINATED", endpoint))
-        return [], None
+        if self.after_reviews is not None:
+            self.pull.update(self.after_reviews)
+        return self.reviews, None
 
     def request(self, method, endpoint, body=None):
         self.calls.append((method, endpoint, body))
         if method == "POST" and endpoint.endswith("/pulls/7/reviews"):
+            self.review_posted = True
             return {"id": "23"}, None
         return None, f"unexpected fake write {method} {endpoint}"
 
@@ -161,7 +171,7 @@ def test_configured_org_without_legacy_pr_review_feature_can_submit_via_fake_tra
     write_orgs(tmp_path)
     config = review_config(tmp_path)
     action = review_action("research-line/unexcluded-control")
-    transport = FakeTransport()
+    transport = FakeTransport(reviews=[{"commit_id": SHA, "state": "DISMISSED", "user": {"login": "different-bot"}}])
 
     assert actions.preview([action], config)["actions"][0]["permitted"] is True
     result = actions.apply([action], transport, config)
@@ -175,6 +185,65 @@ def test_configured_org_without_legacy_pr_review_feature_can_submit_via_fake_tra
             {"commit_id": SHA, "event": "COMMENT", "body": "Independent review receipt."},
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("change", "detail"),
+    [
+        ({"head": {"sha": OTHER_SHA}}, "head moved"),
+        ({"draft": True}, "draft pull request"),
+        ({"state": "closed"}, "not open"),
+    ],
+)
+def test_review_rechecks_current_pull_after_reviews_before_post(tmp_path, change, detail):
+    write_orgs(tmp_path)
+    config = review_config(tmp_path)
+    transport = FakeTransport(after_reviews=change)
+
+    result = actions.apply([review_action("dev-bricks/githubbot-core")], transport, config)
+
+    assert result["receipts"][0]["status"] == "failed"
+    assert detail in result["receipts"][0]["detail"]
+    pull_reads = [
+        index for index, call in enumerate(transport.calls) if call[0] == "GET" and call[1].endswith("/pulls/7")
+    ]
+    reviews_read = next(index for index, call in enumerate(transport.calls) if call[0] == "GET_PAGINATED")
+    assert len(pull_reads) == 2
+    assert pull_reads[0] < reviews_read < pull_reads[1]
+    assert not [call for call in transport.calls if call[0] == "POST"]
+
+
+@pytest.mark.parametrize("state", ["DISMISSED", "COMMENTED", "APPROVED", "CHANGES_REQUESTED", "PENDING"])
+def test_any_existing_bot_review_for_same_head_prevents_repost(tmp_path, state):
+    write_orgs(tmp_path)
+    config = review_config(tmp_path)
+    transport = FakeTransport(reviews=[{"commit_id": SHA, "state": state, "user": {"login": BOT}}])
+
+    result = actions.apply([review_action("dev-bricks/githubbot-core")], transport, config)
+
+    assert result["receipts"][0]["status"] == "failed"
+    assert "already submitted a review" in result["receipts"][0]["detail"]
+    assert not [call for call in transport.calls if call[0] == "POST"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"draft": True},
+        {"state": "closed"},
+        {"head": {"sha": OTHER_SHA}},
+    ],
+)
+def test_review_final_readback_requires_open_non_draft_exact_head(tmp_path, change):
+    write_orgs(tmp_path)
+    config = review_config(tmp_path)
+    transport = FakeTransport(after_post_pull=change)
+
+    result = actions.apply([review_action("dev-bricks/githubbot-core")], transport, config)
+
+    assert result["receipts"][0]["status"] == "failed"
+    assert "state, head or draft" in result["receipts"][0]["detail"]
+    assert len([call for call in transport.calls if call[0] == "POST"]) == 1
 
 
 def test_full_owner_repo_exclusion_is_enforced_and_absent_org_exclusions_are_valid(tmp_path):

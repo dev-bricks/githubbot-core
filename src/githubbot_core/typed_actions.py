@@ -125,6 +125,22 @@ def _pull(transport, repo: str, number) -> tuple[dict, Optional[str]]:
     return data, None
 
 
+def _reviewable_pull(transport, repo: str, number, sha: str, account: str) -> tuple[dict, Optional[str]]:
+    """Require the exact open, non-draft head and a non-self author."""
+    pull, error = _pull(transport, repo, number)
+    if error:
+        return {}, error
+    if pull.get("state") != "open":
+        return {}, "pull request is not open"
+    if (pull.get("head") or {}).get("sha") != sha:
+        return {}, "head moved since review (sha mismatch); nothing written"
+    if pull.get("draft") is not False:
+        return {}, "draft pull request or draft state is not explicitly false; do not submit a formal review"
+    if str((pull.get("user") or {}).get("login") or "").casefold() == account.casefold():
+        return {}, "the configured review account authored this pull request"
+    return pull, None
+
+
 def _reviewed_pull(transport, params: dict, *, draft: bool) -> tuple[dict, Optional[str]]:
     """Fresh read: open, unstacked, exact reviewed head, expected draft state."""
     repo, sha = params["repo"], params["sha"]
@@ -163,36 +179,31 @@ def exec_review(transport, params: dict, config: dict):
         return None, f"identity is not the configured review account {account!r}"
 
     repo, number, sha = params["repo"], int(params["number"]), params["sha"]
-    pull, error = _pull(transport, repo, number)
+    pull, error = _reviewable_pull(transport, repo, number, sha, account)
     if error:
         return None, error
-    if pull.get("state") != "open":
-        return None, "pull request is not open"
-    if (pull.get("head") or {}).get("sha") != sha:
-        return None, "head moved since review (sha mismatch); nothing written"
-    if pull.get("draft"):
-        return None, "draft pull request; do not submit a formal review"
-    if str((pull.get("user") or {}).get("login") or "").casefold() == account.casefold():
-        return None, "the configured review account authored this pull request"
 
     reviews, error = transport.get_paginated(f"repos/{repo}/pulls/{number}/reviews")
     if error or not isinstance(reviews, list):
         return None, f"existing reviews unreadable: {error or 'no data'}"
     if any(
-        item.get("commit_id") == sha
-        and str((item.get("user") or {}).get("login", "")).casefold() == account.casefold()
-        and item.get("state") != "DISMISSED"
+        item.get("commit_id") == sha and str((item.get("user") or {}).get("login", "")).casefold() == account.casefold()
         for item in reviews
         if isinstance(item, dict)
     ):
         return None, "this account already submitted a review for this exact head; read it back instead of duplicating"
 
+    pull, error = _reviewable_pull(transport, repo, number, sha, account)
+    if error:
+        return None, error
+
+    event = params["event"]
+    endpoint = f"repos/{repo}/pulls/{number}/reviews"
+    body = {"commit_id": sha, "event": event, "body": params["body"]}
     scope_error = review_write_scope_denial(repo, config)
     if scope_error:
         return None, scope_error
-    event = params["event"]
-    endpoint = f"repos/{repo}/pulls/{number}/reviews"
-    created, error = transport.request("POST", endpoint, {"commit_id": sha, "event": event, "body": params["body"]})
+    created, error = transport.request("POST", endpoint, body)
     if error or not isinstance(created, dict) or not str(created.get("id", "")).isdecimal():
         return None, error or "review not confirmed by create response"
     review_id = int(created["id"])
@@ -208,8 +219,13 @@ def exec_review(transport, params: dict, config: dict):
     ):
         return None, "review readback does not match the requested account, head or event"
     after, error = _pull(transport, repo, number)
-    if error or after.get("state") != "open" or (after.get("head") or {}).get("sha") != sha:
-        return None, "review submitted, but the pull request head changed before final readback"
+    if (
+        error
+        or after.get("state") != "open"
+        or (after.get("head") or {}).get("sha") != sha
+        or after.get("draft") is not False
+    ):
+        return None, "review submitted, but pull request state, head or draft changed before final readback"
     return {
         "readback": {
             "review_id": review_id,
