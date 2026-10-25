@@ -15,6 +15,9 @@ STARTER = Path(__file__).resolve().parents[1] / "src/githubbot_core/starters/win
 def env_for(tmp_path, code=23):
     package = tmp_path / "githubbot_core"
     package.mkdir()
+    # A namespace package would lose to an installed regular githubbot_core and
+    # accidentally exercise the real CLI instead of this isolated no-provider stub.
+    (package / "__init__.py").write_text("", encoding="ascii")
     (package / "__main__.py").write_text(
         "import sys\nprint('[TEST] no provider started')\nsys.exit(" + str(code) + ")\n", encoding="ascii"
     )

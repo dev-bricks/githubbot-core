@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import subprocess
 from typing import Any, Optional
+from urllib.parse import quote
 
 SHA = re.compile(r"[0-9a-f]{40}")
 REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -21,7 +22,7 @@ WORKFLOW = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml|[0-9]+")
 MERGE_METHODS = ("merge", "squash", "rebase")
 DEFAULT_PUSH_PREFIX = "bot/"
 
-KINDS = ("pr.merge", "pr.ready", "pr.review", "actions.dispatch", "actions.rerun", "pr.create", "git.push_branch")
+KINDS = ("pr.merge", "pr.ready", "pr.review", "pr.close", "actions.dispatch", "actions.rerun", "pr.create", "git.push_branch")
 REVIEW_STATES = {"COMMENT": "COMMENTED", "APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}
 
 _git = subprocess.run  # replaced in tests
@@ -46,6 +47,7 @@ def switch_denial(kind: str, config: dict) -> Optional[str]:
         "pr.merge": policy["merge_enabled"],
         "pr.ready": policy["draft_auto_ready_hours"] is not None or policy["draft_ready_when_mature"],
         "pr.review": policy["publish_reviews"],
+        "pr.close": policy["close_integrated_prs"],
         "actions.dispatch": policy["trigger_missing_ci"],
         "actions.rerun": policy["trigger_missing_ci"],
         "pr.create": policy["open_fix_prs"],
@@ -65,11 +67,31 @@ def param_denial(kind: str, params: dict, config: dict) -> Optional[str]:
         return None
     if not REPO.fullmatch(str(params.get("repo", ""))):
         return "repo must be owner/name"
-    need_sha = kind in ("pr.merge", "pr.ready", "pr.review", "actions.rerun", "git.push_branch")
+    need_sha = kind in ("pr.merge", "pr.ready", "pr.review", "pr.close", "actions.rerun", "git.push_branch")
     if need_sha and not SHA.fullmatch(str(params.get("sha", ""))):
         return "sha must be the exact reviewed 40-character lowercase commit"
-    if kind in ("pr.merge", "pr.ready", "pr.review") and not str(params.get("number", "")).isdecimal():
+    if kind in ("pr.merge", "pr.ready", "pr.review", "pr.close") and not str(params.get("number", "")).isdecimal():
         return "number must be a pull request number"
+    if kind == "pr.close":
+        if int(params["number"]) < 1:
+            return "number must be a positive pull request number"
+        if params.get("reason") != "integrated":
+            return "pr.close only supports reason='integrated'"
+        if not SHA.fullmatch(str(params.get("integration_sha", ""))):
+            return "integration_sha must be the exact current default-branch commit"
+        account = (config.get("multi_bot") or {}).get("merge_account")
+        if not isinstance(account, str) or not account.strip():
+            return "pr.close requires the configured multi_bot.merge_account"
+        settings = config.get("typed_actions") or {}
+        if not isinstance(settings, dict):
+            return "typed_actions must be an object"
+        scopes = settings.get("close_repositories")
+        if not isinstance(scopes, list) or not scopes or any(
+            not isinstance(repo, str) or not REPO.fullmatch(repo) for repo in scopes
+        ):
+            return "pr.close requires explicit typed_actions.close_repositories"
+        if params["repo"] not in scopes:
+            return "repository is outside typed_actions.close_repositories"
     if kind == "pr.review":
         if int(params["number"]) < 1:
             return "number must be a positive pull request number"
@@ -283,6 +305,77 @@ def exec_review(transport, params: dict, config: dict):
     return {"readback": {"review_id": review_id, "head": sha, "state": after["state"], "account": account}}, None
 
 
+def exec_close(transport, params: dict, config: dict):
+    """Close only heads proven contained in the pinned current default branch.
+
+    GitHub's close endpoint has no atomic expected-head argument. Recheck before
+    PATCH and detect races afterwards; ambiguous results must never be retried
+    blindly. Locks and independent source review remain operator responsibilities.
+    """
+    permissions = config.get("permissions") or {}
+    if "pr.close" not in (permissions.get("enabled") or []) or "pr.close" not in (permissions.get("ceiling") or []):
+        return None, "pr.close is not enabled within the permission ceiling"
+    denial = switch_denial("pr.close", config) or param_denial("pr.close", params, config)
+    if denial:
+        return None, denial
+    account = config["multi_bot"]["merge_account"].strip()
+    repo, number, sha = params["repo"], int(params["number"]), params["sha"]
+    integrated = params["integration_sha"]
+
+    def current_target():
+        user, error = transport.get("user")
+        if error or not isinstance(user, dict) or user.get("login") != account:
+            return None, "identity is not the configured close account"
+        branch, error = _default_branch(transport, repo)
+        if error or not isinstance(branch, str):
+            return None, error or "default branch unreadable"
+        ref, error = transport.get(f"repos/{repo}/git/ref/heads/{quote(branch, safe='')}")
+        obj = ref.get("object") if isinstance(ref, dict) else None
+        if error or not isinstance(obj, dict) or obj.get("type") != "commit" or obj.get("sha") != integrated:
+            return None, "default branch moved or unreadable; nothing written"
+        pull, error = _pull(transport, repo, number)
+        head = pull.get("head")
+        base = pull.get("base")
+        base_repo = base.get("repo") if isinstance(base, dict) else None
+        if (
+            error or pull.get("number") != number or pull.get("state") != "open"
+            or pull.get("merged") is not False or not isinstance(head, dict) or head.get("sha") != sha
+            or not isinstance(base_repo, dict) or base_repo.get("full_name") != repo
+        ):
+            return None, "pull is not open and unmerged at the exact head/repository; nothing written"
+        return branch, None
+
+    branch, error = current_target()
+    if error:
+        return None, error
+    proof, error = transport.get(f"repos/{repo}/compare/{sha}...{integrated}")
+    if (
+        error or not isinstance(proof, dict) or proof.get("status") not in ("ahead", "identical")
+        or (proof.get("status") == "identical") != (sha == integrated)
+        or not isinstance(proof.get("base_commit"), dict) or proof["base_commit"].get("sha") != sha
+        or not isinstance(proof.get("merge_base_commit"), dict) or proof["merge_base_commit"].get("sha") != sha
+    ):
+        return None, "head is not proven integrated in the pinned default branch"
+    latest_branch, error = current_target()
+    if error or latest_branch != branch:
+        return None, error or "default branch name changed; nothing written"
+    _, error = transport.request("PATCH", f"repos/{repo}/pulls/{number}", {"state": "closed"})
+    if error:
+        return None, "close write unconfirmed; independently read PR state before any retry: " + str(error)
+    after, error = _pull(transport, repo, number)
+    head = after.get("head")
+    base = after.get("base")
+    base_repo = base.get("repo") if isinstance(base, dict) else None
+    if (
+        error or after.get("number") != number or after.get("state") != "closed"
+        or after.get("merged") is not False or not isinstance(head, dict) or head.get("sha") != sha
+        or not isinstance(base_repo, dict) or base_repo.get("full_name") != repo
+    ):
+        return None, "close readback unconfirmed or head changed; do not blindly retry"
+    return {"readback": {"closed": True, "merged": False, "head": sha,
+                         "integration_sha": integrated, "reason": "integrated", "account": account}}, None
+
+
 def exec_dispatch(transport, params: dict, config: dict):
     repo, workflow = params["repo"], params["workflow"]
     data, error = transport.get(f"repos/{repo}/actions/workflows/{workflow}")
@@ -371,6 +464,7 @@ EXECUTORS: dict[str, Any] = {
     "pr.merge": exec_merge,
     "pr.ready": exec_ready,
     "pr.review": exec_review,
+    "pr.close": exec_close,
     "actions.dispatch": exec_dispatch,
     "actions.rerun": exec_rerun,
     "pr.create": exec_create_pr,
