@@ -113,19 +113,33 @@ not a silent override. `permissions.enabled` must stay inside the ceiling.
 | `pr.merge` | disabled | re-reads the PR (open, exact `sha`, default base, not draft, `mergeable_state` clean, configured merge account), `PUT …/pulls/{n}/merge` with `sha`, reads `merged` back |
 | `pr.ready` | disabled | re-reads the draft at the exact `sha`, GraphQL `markPullRequestReadyForReview`, reads back |
 | `pr.review` | disabled | submits `COMMENT`, `APPROVE` or `REQUEST_CHANGES` to `POST …/pulls/{n}/reviews` with mandatory `sha`/body; requires the configured account and reads review ID, actor, commit, body and state back |
+| `pr.close` | disabled | closes a PR only after its exact head is proven contained in the pinned current default branch; requires an explicit repository allowlist, configured account and closed-state readback |
 | `actions.dispatch` | disabled | `POST …/actions/workflows/{workflow}/dispatches` for an active workflow |
 | `actions.rerun` | disabled | `POST …/actions/runs/{id}/rerun` for a completed, non-fork run of the exact `sha` |
 | `pr.create` | disabled | `POST …/pulls` from a bot-prefixed branch onto the default branch |
 | `git.push_branch` | disabled | `git push origin <sha>:refs/heads/<branch>` without force, bot prefix only (`typed_actions.push_branch_prefix`, default `bot/`), never the default branch, verified with `ls-remote` |
 
-The seven typed actions sit in the default ceiling but are never enabled by default. Each one also
+The eight typed actions sit in the default ceiling but are never enabled by default. Each one also
 needs its `multi_bot` switch (`merge_enabled`, `policy.draft_*`, `policy.trigger_missing_ci`,
-`policy.open_fix_prs`, `policy.publish_reviews`); a permission alone opens nothing. One action at a time:
+`policy.open_fix_prs`, `policy.publish_reviews`, `policy.close_integrated_prs`); a permission alone opens nothing. One action at a time:
 
 ```bash
 githubbot-core --config instance.json act pr.merge --params '{"repo": "o/r", "number": 7, "sha": "<40-hex>"}'
 githubbot-core --config instance.json act pr.merge --params '…' --apply --expect-plan <plan_sha256>
 ```
+
+Closing integrated PRs additionally requires `typed_actions.close_repositories`, an explicit list
+of exact `owner/repo` names. Enable `pr.close` and `multi_bot.policy.close_integrated_prs`, set
+`multi_bot.merge_account`, then preview:
+`act pr.close --params '{"repo":"o/r","number":7,"sha":"<40-hex-head>","integration_sha":"<40-hex-current-default>","reason":"integrated"}'`.
+Apply only the inspected `--expect-plan`. Drafts and stacked PRs are eligible only when their
+head is proven contained in that default-branch commit. The action never deletes a branch,
+posts a comment or closes an unintegrated head. Repository/account/head/default branch are
+rechecked immediately before PATCH; PR state and head are read again afterwards. GitHub's
+[update endpoint](https://docs.github.com/en/rest/pulls/pulls#update-a-pull-request) has no atomic
+expected-head condition: a race detected after writing is an unconfirmed failure, not success.
+Do not blindly retry an ambiguous write; inspect the current PR first. Scope locks and an
+independent review of the integration proof remain operator responsibilities.
 
 Formal reviews require an explicit instance opt-in, for example
 `{"permissions":{"enabled":["pr.review"]},"multi_bot":{"merge_account":"example-bot","policy":{"publish_reviews":true}}}`.

@@ -11,12 +11,16 @@
       "pr.merge",
       "pr.ready",
       "pr.review",
+      "pr.close",
       "actions.dispatch",
       "actions.rerun",
       "pr.create",
       "git.push_branch"
     ],
     "enabled": ["issue.add_labels", "issue.comment"]
+  },
+  "typed_actions": {
+    "close_repositories": []
   },
   "label_schema": {
     "bug": {"color": "d73a4a", "description": "Something is not working", "auto_apply": true},

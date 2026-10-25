@@ -115,20 +115,35 @@ stille Überschreibung. `permissions.enabled` muss innerhalb der Obergrenze blei
 | `pr.merge` | aus | liest den PR frisch (offen, exakter `sha`, Default-Base, kein Draft, `mergeable_state` clean, konfiguriertes Merge-Konto), `PUT …/pulls/{n}/merge` mit `sha`, liest `merged` zurück |
 | `pr.ready` | aus | liest den Draft am exakten `sha` frisch, GraphQL `markPullRequestReadyForReview`, liest zurück |
 | `pr.review` | aus | veröffentlicht `COMMENT`, `APPROVE` oder `REQUEST_CHANGES` über `POST …/pulls/{n}/reviews`, mit verpflichtendem `sha` und Text; prüft Konto und liest Review-ID, Autor, Commit, Text und Zustand zurück |
+| `pr.close` | aus | schließt nur einen PR, dessen exakter Head im gebundenen aktuellen Default-Branch nachweislich enthalten ist; braucht explizite Repository-Liste, konfiguriertes Konto und Rücklesen des geschlossenen Zustands |
 | `actions.dispatch` | aus | `POST …/actions/workflows/{workflow}/dispatches` für einen aktiven Workflow |
 | `actions.rerun` | aus | `POST …/actions/runs/{id}/rerun` für einen abgeschlossenen Lauf des exakten `sha`, nie aus Forks |
 | `pr.create` | aus | `POST …/pulls` von einem Branch mit Bot-Präfix auf den Default-Branch |
 | `git.push_branch` | aus | `git push origin <sha>:refs/heads/<branch>` ohne Force, nur Bot-Präfix (`typed_actions.push_branch_prefix`, Standard `bot/`), nie der Default-Branch, Prüfung per `ls-remote` |
 
-Die sieben getypten Aktionen stehen in der Standard-Obergrenze, sind aber nie standardmäßig aktiv.
+Die acht getypten Aktionen stehen in der Standard-Obergrenze, sind aber nie standardmäßig aktiv.
 Jede braucht zusätzlich ihren `multi_bot`-Schalter (`merge_enabled`, `policy.draft_*`,
-`policy.trigger_missing_ci`, `policy.open_fix_prs`, `policy.publish_reviews`); eine Berechtigung allein öffnet nichts.
+`policy.trigger_missing_ci`, `policy.open_fix_prs`, `policy.publish_reviews`, `policy.close_integrated_prs`); eine Berechtigung allein öffnet nichts.
 Eine Aktion je Aufruf:
 
 ```bash
 githubbot-core --config instanz.json act pr.merge --params '{"repo": "o/r", "number": 7, "sha": "<40-hex>"}'
 githubbot-core --config instanz.json act pr.merge --params '…' --apply --expect-plan <plan_sha256>
 ```
+
+Das Schließen integrierter PRs braucht zusätzlich `typed_actions.close_repositories`, eine Liste
+exakter Namen im Format `owner/repo`. `pr.close` und `multi_bot.policy.close_integrated_prs`
+aktivieren, `multi_bot.merge_account` setzen und zunächst die Vorschau ausführen:
+`act pr.close --params '{"repo":"o/r","number":7,"sha":"<40-hex-head>","integration_sha":"<40-hex-aktueller-default>","reason":"integrated"}'`.
+Nur den geprüften Plan mit `--expect-plan` anwenden. Auch Drafts und gestapelte PRs sind nur
+dann geeignet, wenn ihr Head nachweislich in diesem Default-Branch-Commit enthalten ist.
+Die Aktion löscht keine Branches, veröffentlicht keine Kommentare und schließt keine noch
+nicht integrierten Heads. Konto, Repository, Head und Default-Branch werden unmittelbar vor
+PATCH erneut geprüft, PR-Zustand und Head danach zurückgelesen. GitHubs
+[Update-Endpunkt](https://docs.github.com/en/rest/pulls/pulls#update-a-pull-request) bietet keine
+atomare Head-Bedingung: Ein erst nach dem Schreiben erkanntes Rennen bleibt ein unbestätigter
+Fehler. Unklare Schreibversuche nie blind wiederholen; zuerst den aktuellen PR lesen.
+Scope-Sperren und unabhängige Prüfung des Integrationsnachweises bleiben Operator-Aufgaben.
 
 Formale Reviews brauchen ein ausdrückliches Instanz-Opt-in, beispielsweise
 `{"permissions":{"enabled":["pr.review"]},"multi_bot":{"merge_account":"example-bot","policy":{"publish_reviews":true}}}`.

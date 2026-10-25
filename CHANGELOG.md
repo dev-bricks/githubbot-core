@@ -8,6 +8,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 
 ### Hinzugefügt / Added
 
+- Opt-in-Aktion `pr.close` für nachweislich integrierte Heads: explizite Repository-Liste,
+  eigenes Policy-Opt-in, exakte Head-/Default-SHAs, Kontoprüfung und unabhängiges Rücklesen.
+  Keine Branch-Löschung, keine pauschalen Schließungen. / Typed opt-in closure of heads
+  proven contained in the pinned default branch, with explicit repository scope and readback.
 - Opt-in-Aktion `pr.review` für formale GitHub-Reviews am exakten Head mit Kontoprüfung,
   verpflichtendem Event/Text, Duplikatprüfung und unabhängigem Review-/Head-Readback.
   Standardmäßig deaktiviert; braucht `permissions.enabled` und `policy.publish_reviews`.

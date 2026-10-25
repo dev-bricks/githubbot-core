@@ -212,6 +212,12 @@ und ersetzen weder Merge-Opt-in noch Identitätsprüfung.
   Prüfumfang (gelesen/nicht gelesen), Testergebnis mit Befehl, Befunde mit Datei und Zeile.
   Ein Beitrag pro (PR, Head); keine Secrets, keine lokalen Pfade. Ohne diesen Schalter bleibt
   das Ergebnis im Bericht.
+- `close_integrated_prs` (bool, standardmäßig aus): erlaubt ausschließlich `pr.close` für
+  nachweislich im aktuellen Default-Branch integrierte Heads. Zusätzlich braucht die Aktion
+  eine explizite Liste `typed_actions.close_repositories`, ihre Berechtigung und das konfigurierte
+  Konto. Exakte Head-/Integrations-SHAs, Vorschau/Planbindung und frische Integrationsprüfung
+  sind Pflicht. Keine Branch-Löschung oder pauschalen Schließungen. Bei unklarem Schreibversuch
+  zuerst unabhängig zurücklesen; niemals blind wiederholen.
 - `open_fix_prs` (bool): erlaubt Fix-Branches zu pushen (Core-Aktion `git.push_branch`: nur
   Bot-Präfix `typed_actions.push_branch_prefix`, nie Default-Branch, nie Force) und PRs zu
   öffnen (`pr.create`, Base immer der Default-Branch). Ohne diesen Schalter bleiben Fixes lokal
