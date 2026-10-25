@@ -84,7 +84,13 @@ def policy_settings(raw):
     hours = policy["draft_auto_ready_hours"]
     if hours is not None and (type(hours) not in (int, float) or hours <= 0):
         raise ValueError("multi_bot.policy.draft_auto_ready_hours must be null or a positive number")
-    for key in ("draft_ready_when_mature", "trigger_missing_ci", "publish_reviews", "open_fix_prs", "close_integrated_prs"):
+    for key in (
+        "draft_ready_when_mature",
+        "trigger_missing_ci",
+        "publish_reviews",
+        "open_fix_prs",
+        "close_integrated_prs",
+    ):
         if type(policy[key]) is not bool:
             raise ValueError(f"multi_bot.policy.{key} must be a boolean")
     return policy

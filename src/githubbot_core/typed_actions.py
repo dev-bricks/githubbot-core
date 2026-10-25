@@ -22,7 +22,16 @@ WORKFLOW = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml|[0-9]+")
 MERGE_METHODS = ("merge", "squash", "rebase")
 DEFAULT_PUSH_PREFIX = "bot/"
 
-KINDS = ("pr.merge", "pr.ready", "pr.review", "pr.close", "actions.dispatch", "actions.rerun", "pr.create", "git.push_branch")
+KINDS = (
+    "pr.merge",
+    "pr.ready",
+    "pr.review",
+    "pr.close",
+    "actions.dispatch",
+    "actions.rerun",
+    "pr.create",
+    "git.push_branch",
+)
 REVIEW_STATES = {"COMMENT": "COMMENTED", "APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}
 
 _git = subprocess.run  # replaced in tests
@@ -86,8 +95,10 @@ def param_denial(kind: str, params: dict, config: dict) -> Optional[str]:
         if not isinstance(settings, dict):
             return "typed_actions must be an object"
         scopes = settings.get("close_repositories")
-        if not isinstance(scopes, list) or not scopes or any(
-            not isinstance(repo, str) or not REPO.fullmatch(repo) for repo in scopes
+        if (
+            not isinstance(scopes, list)
+            or not scopes
+            or any(not isinstance(repo, str) or not REPO.fullmatch(repo) for repo in scopes)
         ):
             return "pr.close requires explicit typed_actions.close_repositories"
         if params["repo"] not in scopes:
@@ -338,9 +349,14 @@ def exec_close(transport, params: dict, config: dict):
         base = pull.get("base")
         base_repo = base.get("repo") if isinstance(base, dict) else None
         if (
-            error or pull.get("number") != number or pull.get("state") != "open"
-            or pull.get("merged") is not False or not isinstance(head, dict) or head.get("sha") != sha
-            or not isinstance(base_repo, dict) or base_repo.get("full_name") != repo
+            error
+            or pull.get("number") != number
+            or pull.get("state") != "open"
+            or pull.get("merged") is not False
+            or not isinstance(head, dict)
+            or head.get("sha") != sha
+            or not isinstance(base_repo, dict)
+            or base_repo.get("full_name") != repo
         ):
             return None, "pull is not open and unmerged at the exact head/repository; nothing written"
         return branch, None
@@ -350,10 +366,14 @@ def exec_close(transport, params: dict, config: dict):
         return None, error
     proof, error = transport.get(f"repos/{repo}/compare/{sha}...{integrated}")
     if (
-        error or not isinstance(proof, dict) or proof.get("status") not in ("ahead", "identical")
+        error
+        or not isinstance(proof, dict)
+        or proof.get("status") not in ("ahead", "identical")
         or (proof.get("status") == "identical") != (sha == integrated)
-        or not isinstance(proof.get("base_commit"), dict) or proof["base_commit"].get("sha") != sha
-        or not isinstance(proof.get("merge_base_commit"), dict) or proof["merge_base_commit"].get("sha") != sha
+        or not isinstance(proof.get("base_commit"), dict)
+        or proof["base_commit"].get("sha") != sha
+        or not isinstance(proof.get("merge_base_commit"), dict)
+        or proof["merge_base_commit"].get("sha") != sha
     ):
         return None, "head is not proven integrated in the pinned default branch"
     latest_branch, error = current_target()
@@ -367,13 +387,26 @@ def exec_close(transport, params: dict, config: dict):
     base = after.get("base")
     base_repo = base.get("repo") if isinstance(base, dict) else None
     if (
-        error or after.get("number") != number or after.get("state") != "closed"
-        or after.get("merged") is not False or not isinstance(head, dict) or head.get("sha") != sha
-        or not isinstance(base_repo, dict) or base_repo.get("full_name") != repo
+        error
+        or after.get("number") != number
+        or after.get("state") != "closed"
+        or after.get("merged") is not False
+        or not isinstance(head, dict)
+        or head.get("sha") != sha
+        or not isinstance(base_repo, dict)
+        or base_repo.get("full_name") != repo
     ):
         return None, "close readback unconfirmed or head changed; do not blindly retry"
-    return {"readback": {"closed": True, "merged": False, "head": sha,
-                         "integration_sha": integrated, "reason": "integrated", "account": account}}, None
+    return {
+        "readback": {
+            "closed": True,
+            "merged": False,
+            "head": sha,
+            "integration_sha": integrated,
+            "reason": "integrated",
+            "account": account,
+        }
+    }, None
 
 
 def exec_dispatch(transport, params: dict, config: dict):
