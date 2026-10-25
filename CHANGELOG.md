@@ -8,6 +8,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 
 ### Hinzugefügt / Added
 
+- Opt-in-Aktion `pr.review` für formale GitHub-Reviews am exakten Head mit Kontoprüfung,
+  verpflichtendem Event/Text, Duplikatprüfung und unabhängigem Review-/Head-Readback.
+  Standardmäßig deaktiviert; braucht `permissions.enabled` und `policy.publish_reviews`.
+  Keine automatische Aktivierung oder Abnahme eigener Änderungen. / Opt-in formal reviews
+  bound to the exact commit, with account checks, duplicate detection and independent readback.
 - Getypte Schreibaktionen `pr.merge`, `pr.ready`, `actions.dispatch`, `actions.rerun`, `pr.create`
   und `git.push_branch` mit frischem Lesen, exakter Head-Bindung und Rücklesen; in der
   Standard-Obergrenze, aber nie standardmäßig aktiv. Jede braucht zusätzlich ihren

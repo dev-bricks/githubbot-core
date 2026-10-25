@@ -21,7 +21,8 @@ WORKFLOW = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml|[0-9]+")
 MERGE_METHODS = ("merge", "squash", "rebase")
 DEFAULT_PUSH_PREFIX = "bot/"
 
-KINDS = ("pr.merge", "pr.ready", "actions.dispatch", "actions.rerun", "pr.create", "git.push_branch")
+KINDS = ("pr.merge", "pr.ready", "pr.review", "actions.dispatch", "actions.rerun", "pr.create", "git.push_branch")
+REVIEW_STATES = {"COMMENT": "COMMENTED", "APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}
 
 _git = subprocess.run  # replaced in tests
 
@@ -44,6 +45,7 @@ def switch_denial(kind: str, config: dict) -> Optional[str]:
     allowed = {
         "pr.merge": policy["merge_enabled"],
         "pr.ready": policy["draft_auto_ready_hours"] is not None or policy["draft_ready_when_mature"],
+        "pr.review": policy["publish_reviews"],
         "actions.dispatch": policy["trigger_missing_ci"],
         "actions.rerun": policy["trigger_missing_ci"],
         "pr.create": policy["open_fix_prs"],
@@ -63,11 +65,21 @@ def param_denial(kind: str, params: dict, config: dict) -> Optional[str]:
         return None
     if not REPO.fullmatch(str(params.get("repo", ""))):
         return "repo must be owner/name"
-    need_sha = kind in ("pr.merge", "pr.ready", "actions.rerun", "git.push_branch")
+    need_sha = kind in ("pr.merge", "pr.ready", "pr.review", "actions.rerun", "git.push_branch")
     if need_sha and not SHA.fullmatch(str(params.get("sha", ""))):
         return "sha must be the exact reviewed 40-character lowercase commit"
-    if kind in ("pr.merge", "pr.ready") and not str(params.get("number", "")).isdecimal():
+    if kind in ("pr.merge", "pr.ready", "pr.review") and not str(params.get("number", "")).isdecimal():
         return "number must be a pull request number"
+    if kind == "pr.review":
+        if int(params["number"]) < 1:
+            return "number must be a positive pull request number"
+        if not isinstance(params.get("event"), str) or params["event"] not in REVIEW_STATES:
+            return "event must be COMMENT, APPROVE or REQUEST_CHANGES"
+        body = params.get("body")
+        if not isinstance(body, str) or not body.strip() or len(body) > 65536:
+            return "body must be nonempty review text of at most 65536 characters"
+        if not str((config.get("multi_bot") or {}).get("merge_account") or "").strip():
+            return "pr.review requires the configured multi_bot.merge_account"
     if kind == "pr.merge" and params.get("method", "merge") not in MERGE_METHODS:
         return f"method must be one of {list(MERGE_METHODS)}"
     if kind == "actions.dispatch":
@@ -190,6 +202,87 @@ def exec_ready(transport, params: dict, config: dict):
     return {"readback": {"draft": False, "head": params["sha"]}}, None
 
 
+def exec_review(transport, params: dict, config: dict):
+    """Publish one submitted, exact-head review; never an issue comment or pending draft.
+
+    Scope locks and author-instance independence remain the operator's responsibility.
+    A failed/ambiguous write is not retried: a subsequent attempt must read reviews first.
+    """
+    account = str((config.get("multi_bot") or {}).get("merge_account") or "").strip()
+    if not account:
+        return None, "pr.review requires the configured multi_bot.merge_account"
+    user, error = transport.get("user")
+    if error or not isinstance(user, dict) or user.get("login") != account:
+        return None, f"identity is not the configured review account {account!r}"
+    repo, number, sha = params["repo"], int(params["number"]), params["sha"]
+    endpoint = f"repos/{repo}/pulls/{number}"
+
+    def current_pull():
+        pull, error = _pull(transport, repo, number)
+        if error:
+            return {}, error
+        head = pull.get("head")
+        if pull.get("state") != "open" or not isinstance(head, dict) or head.get("sha") != sha:
+            return {}, "pull is not open at the reviewed sha; nothing written"
+        if params["event"] != "COMMENT":
+            if pull.get("draft") is not False:
+                return {}, "only COMMENT reviews are allowed on drafts or an unknown draft state"
+            author = pull.get("user")
+            if not isinstance(author, dict) or not isinstance(author.get("login"), str) or not author["login"].strip():
+                return {}, "pull request author unreadable; nothing written"
+            if author["login"].casefold() == account.casefold():
+                return {}, "cannot approve or request changes on the account's own pull request"
+        return pull, None
+
+    _, error = current_pull()
+    if error:
+        return None, error
+    reviews, error = transport.get_paginated(f"{endpoint}/reviews?per_page=100")
+    if error or not isinstance(reviews, list):
+        return None, f"existing reviews unreadable: {error or 'no list'}"
+    for review in reviews:
+        if (
+            not isinstance(review, dict)
+            or not isinstance(review.get("user"), dict)
+            or not isinstance(review["user"].get("login"), str)
+            or not review["user"]["login"].strip()
+            or not isinstance(review.get("commit_id"), str)
+            or not SHA.fullmatch(review["commit_id"])
+        ):
+            return None, "existing review record unreadable; nothing written"
+        if review["user"]["login"].casefold() == account.casefold() and review["commit_id"] == sha:
+            return None, f"review already exists for this account/head (id={review.get('id')}); nothing written"
+    # Pagination may take time; bind the write to a fresh head again afterwards.
+    _, error = current_pull()
+    if error:
+        return None, error
+    body = {"commit_id": sha, "event": params["event"], "body": params["body"]}
+    created, error = transport.request("POST", f"{endpoint}/reviews", body)
+    if error:
+        return None, f"review write unconfirmed: {error}; read existing reviews before any retry"
+    review_id = created.get("id") if isinstance(created, dict) else None
+    if type(review_id) is not int or review_id < 1:
+        return None, "review write unconfirmed (no review id); read existing reviews before any retry"
+    after, error = transport.get(f"{endpoint}/reviews/{review_id}")
+    if (
+        error
+        or not isinstance(after, dict)
+        or type(after.get("id")) is not int
+        or after.get("id") != review_id
+        or after.get("commit_id") != sha
+        or after.get("state") != REVIEW_STATES[params["event"]]
+        or after.get("body") != params["body"]
+        or not isinstance(after.get("user"), dict)
+        or after["user"].get("login") != account
+    ):
+        return None, f"review id={review_id} created but readback unconfirmed; do not blindly retry"
+    latest, error = _pull(transport, repo, number)
+    head = latest.get("head")
+    if error or latest.get("state") != "open" or not isinstance(head, dict) or head.get("sha") != sha:
+        return None, f"review id={review_id} confirmed but target changed; re-review current head, do not retry"
+    return {"readback": {"review_id": review_id, "head": sha, "state": after["state"], "account": account}}, None
+
+
 def exec_dispatch(transport, params: dict, config: dict):
     repo, workflow = params["repo"], params["workflow"]
     data, error = transport.get(f"repos/{repo}/actions/workflows/{workflow}")
@@ -277,6 +370,7 @@ def exec_push_branch(transport, params: dict, config: dict):
 EXECUTORS: dict[str, Any] = {
     "pr.merge": exec_merge,
     "pr.ready": exec_ready,
+    "pr.review": exec_review,
     "actions.dispatch": exec_dispatch,
     "actions.rerun": exec_rerun,
     "pr.create": exec_create_pr,

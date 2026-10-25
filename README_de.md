@@ -114,20 +114,39 @@ stille Überschreibung. `permissions.enabled` muss innerhalb der Obergrenze blei
 | `api.request` | aus | beliebige Schreibmethode auf einem Endpunkt, der mit einem Eintrag aus `permissions.api_write_prefixes` beginnt |
 | `pr.merge` | aus | liest den PR frisch (offen, exakter `sha`, Default-Base, kein Draft, `mergeable_state` clean, konfiguriertes Merge-Konto), `PUT …/pulls/{n}/merge` mit `sha`, liest `merged` zurück |
 | `pr.ready` | aus | liest den Draft am exakten `sha` frisch, GraphQL `markPullRequestReadyForReview`, liest zurück |
+| `pr.review` | aus | veröffentlicht `COMMENT`, `APPROVE` oder `REQUEST_CHANGES` über `POST …/pulls/{n}/reviews`, mit verpflichtendem `sha` und Text; prüft Konto und liest Review-ID, Autor, Commit, Text und Zustand zurück |
 | `actions.dispatch` | aus | `POST …/actions/workflows/{workflow}/dispatches` für einen aktiven Workflow |
 | `actions.rerun` | aus | `POST …/actions/runs/{id}/rerun` für einen abgeschlossenen Lauf des exakten `sha`, nie aus Forks |
 | `pr.create` | aus | `POST …/pulls` von einem Branch mit Bot-Präfix auf den Default-Branch |
 | `git.push_branch` | aus | `git push origin <sha>:refs/heads/<branch>` ohne Force, nur Bot-Präfix (`typed_actions.push_branch_prefix`, Standard `bot/`), nie der Default-Branch, Prüfung per `ls-remote` |
 
-Die sechs getypten Aktionen stehen in der Standard-Obergrenze, sind aber nie standardmäßig aktiv.
+Die sieben getypten Aktionen stehen in der Standard-Obergrenze, sind aber nie standardmäßig aktiv.
 Jede braucht zusätzlich ihren `multi_bot`-Schalter (`merge_enabled`, `policy.draft_*`,
-`policy.trigger_missing_ci`, `policy.open_fix_prs`); eine Berechtigung allein öffnet nichts.
+`policy.trigger_missing_ci`, `policy.open_fix_prs`, `policy.publish_reviews`); eine Berechtigung allein öffnet nichts.
 Eine Aktion je Aufruf:
 
 ```bash
 githubbot-core --config instanz.json act pr.merge --params '{"repo": "o/r", "number": 7, "sha": "<40-hex>"}'
 githubbot-core --config instanz.json act pr.merge --params '…' --apply --expect-plan <plan_sha256>
 ```
+
+Formale Reviews brauchen ein ausdrückliches Instanz-Opt-in, beispielsweise
+`{"permissions":{"enabled":["pr.review"]},"multi_bot":{"merge_account":"example-bot","policy":{"publish_reviews":true}}}`.
+Danach `act pr.review --params '{"repo":"o/r","number":7,"sha":"<40-hex>","event":"COMMENT","body":"Prüfumfang und Belege"}'`
+als Vorschau ausführen und genau diesen Plan anwenden. Anders als `issue.comment` entsteht ein
+veröffentlichtes GitHub-Review. Ein fehlendes Event oder leerer Text wird verweigert;
+Inline-Kommentare und ausstehende Reviews werden nicht unterstützt.
+Die [GitHub-Review-API](https://docs.github.com/en/rest/pulls/reviews#create-a-review-for-a-pull-request)
+bindet das Review an `commit_id`; Core liest den Head zusätzlich vor und nach Veröffentlichung.
+Drafts erlauben nur `COMMENT`; gestapelte PRs dürfen geprüft werden, ohne Merge-Gates zu lockern.
+Ein vorhandenes Review dieses Kontos am selben Head verhindert einen weiteren POST, auch nach
+einem unklaren Timeout. Bei fehlgeschlagenem POST/Readback kann das Review bereits existieren:
+vor einer Wiederholung die gemeldete Review-ID oder Liste prüfen. Gleichzeitige Publisher brauchen
+weiter gemeinsame Scope-Locks; dies ist keine atomare Eindeutigkeitsgarantie des Servers.
+Vollständige Diff-Prüfung, Unabhängigkeit der Autorensitzung, Scope-Locks und Belege bleiben
+Aufgabe des Aufrufers. Approval/Änderungswünsche am eigenen Konto-PR werden verweigert; ein
+anderes GitHub-Konto allein beweist jedoch keine unabhängige Sitzung. Die Installation aktiviert
+die Fähigkeit nicht; bestehende Instanzkonfigurationen bleiben unverändert.
 
 ```json
 {"permissions": {"enabled": ["issue.add_labels", "issue.comment", "api.request"],
