@@ -479,8 +479,50 @@ def test_push_branch_redacts_secret_like_git_errors(monkeypatch, caplog):
     receipt = actions.apply([_push_action()], _push_transport(), config())["receipts"][0]
     assert receipt["status"] == "failed"
     assert token not in receipt["detail"] and token not in caplog.text
+    assert "git process exited with code 128" in receipt["detail"]
     assert "read the target before retrying" in receipt["detail"]
     assert temp_dirs and all(not os.path.exists(directory) for directory in temp_dirs)
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        ("start", "git process could not start (FileNotFoundError)"),
+        ("timeout", "git process timed out"),
+        ("exit", "git process exited with code 128"),
+    ],
+)
+def test_push_failure_receipt_reports_only_safe_process_category(monkeypatch, caplog, failure, expected):
+    token, _ = _mock_push_token(monkeypatch)
+    temp_dirs = []
+
+    def git(cmd, **kwargs):
+        if "push" in cmd:
+            temp_dirs.append(Path(kwargs["env"]["GIT_ASKPASS"]).parent)
+            if failure == "start":
+                raise FileNotFoundError(f"synthetic credential-shaped text {token}")
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(
+                    cmd, timeout=120, output=f"synthetic {token}", stderr=f"rejected {token}"
+                )
+            return SimpleNamespace(
+                returncode=128,
+                stdout=f"remote rejected {token}",
+                stderr=f"authentication failed {token}",
+            )
+        return _fake_git_output(
+            cmd,
+            origin=f"https://github.com/{REPO}.git",
+            pushurl=f"https://github.com/{REPO}.git",
+        )
+
+    monkeypatch.setattr(typed_actions, "_git", git)
+    receipt = actions.apply([_push_action()], _push_transport(), config())["receipts"][0]
+    assert receipt["status"] == "failed"
+    assert expected in receipt["detail"]
+    assert "read the target before retrying" in receipt["detail"]
+    assert token not in receipt["detail"] and token not in caplog.text
+    assert temp_dirs and all(not directory.exists() for directory in temp_dirs)
 
 
 def test_git_base_environment_removes_ambient_auth_and_repo_overrides(monkeypatch):
@@ -498,9 +540,10 @@ def test_git_base_environment_removes_ambient_auth_and_repo_overrides(monkeypatc
     assert env["GIT_CONFIG_GLOBAL"] == os.devnull
 
 
-def test_git_askpass_helper_uses_child_env_and_cleans_tempfiles():
+def test_git_askpass_helper_uses_child_env_and_cleans_tempfiles(monkeypatch, tmp_path):
     token = "synthetic-askpass-token"
     directory = None
+    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "invalid-pythonhome"))
     with typed_actions._git_auth_environment(token, "example-bot") as env:
         helper = Path(env["GIT_ASKPASS"])
         directory = helper.parent
@@ -533,6 +576,7 @@ def test_git_askpass_helper_uses_child_env_and_cleans_tempfiles():
         password = run_askpass("Password for https://github.com:")
         assert username.stdout == "example-bot"
         assert password.stdout == token
+        assert env["PYTHONHOME"].endswith("invalid-pythonhome")
         assert all(token not in str(command) for command in commands)
     assert directory is not None and not directory.exists()
 

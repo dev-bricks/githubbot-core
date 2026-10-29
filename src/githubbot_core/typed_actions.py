@@ -566,13 +566,13 @@ def _git_auth_environment(token: str, account: str):
         )
         if os.name == "nt":
             helper.write_text(
-                '@echo off\r\n"%GITHUBBOT_ASKPASS_PYTHON%" "%~dp0askpass.py" %*\r\nexit /b %ERRORLEVEL%\r\n',
+                '@echo off\r\n"%GITHUBBOT_ASKPASS_PYTHON%" -I "%~dp0askpass.py" %*\r\nexit /b %ERRORLEVEL%\r\n',
                 encoding="utf-8",
                 newline="",
             )
         else:
             helper.write_text(
-                '#!/bin/sh\nexec "$GITHUBBOT_ASKPASS_PYTHON" "$(dirname "$0")/askpass.py" "$@"\n',
+                '#!/bin/sh\nexec "$GITHUBBOT_ASKPASS_PYTHON" -I "$(dirname "$0")/askpass.py" "$@"\n',
                 encoding="utf-8",
                 newline="\n",
             )
@@ -618,12 +618,14 @@ def _run_git(
             timeout=120,
             env=run_env,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return "", "git command failed"
-    except Exception:
-        return "", "git command failed"
+    except subprocess.TimeoutExpired:
+        return "", "git process timed out"
+    except OSError as exc:
+        return "", f"git process could not start ({type(exc).__name__})"
+    except Exception as exc:
+        return "", f"git process failed ({type(exc).__name__})"
     if result.returncode:
-        return "", f"git command failed (exit {result.returncode})"
+        return "", f"git process exited with code {result.returncode}"
     return (result.stdout or "").strip(), None
 
 
@@ -711,9 +713,11 @@ def exec_push_branch(transport, params: dict, config: dict):
             # No '+' refspec and no --force: a non-fast-forward is rejected by git itself.
             _, error = _run_git(path, "push", "origin", f"{sha}:{ref}", env=env, repo=repo)
             if error:
-                return None, "git push failed or its outcome is unknown; read the target before retrying"
+                return None, f"{error}; push outcome is unknown; read the target before retrying"
             remote, error = _run_git(path, "ls-remote", "--exit-code", "origin", ref, env=env, repo=repo)
-            if error or not _exact_remote_ref(remote, sha, ref):
+            if error:
+                return None, f"push readback could not be confirmed ({error}); read the target before retrying"
+            if not _exact_remote_ref(remote, sha, ref):
                 return None, "push readback is unconfirmed; read the target before retrying"
     except Exception:
         return None, "account-bound Git transport failed; read the target before retrying"
