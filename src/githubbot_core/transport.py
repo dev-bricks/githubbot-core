@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 from typing import Any, Callable, Optional, Protocol
 
@@ -39,7 +40,14 @@ class GhCliTransport:
         self.timeout = timeout
         self._runner = runner
 
-    def _invoke(self, args: list[str], stdin: Optional[str] = None) -> tuple[str, Optional[str]]:
+    def _invoke(
+        self,
+        args: list[str],
+        stdin: Optional[str] = None,
+        *,
+        env: Optional[dict[str, str]] = None,
+        generic_errors: bool = False,
+    ) -> tuple[str, Optional[str]]:
         cmd = [self.gh, "api", "-H", f"X-GitHub-Api-Version: {API_VERSION}", *args]
         run = self._runner or subprocess.run
         try:
@@ -51,15 +59,43 @@ class GhCliTransport:
                 encoding="utf-8",
                 errors="replace",
                 timeout=self.timeout,
+                **({"env": env} if env is not None else {}),
             )
         except subprocess.TimeoutExpired:
-            return "", "Timeout"
+            return "", "GitHub request failed" if generic_errors else "Timeout"
         except Exception as exc:  # the transport reports, it never raises (callers collect partial errors)
-            return "", f"{type(exc).__name__}: {exc}"
+            return "", "GitHub request failed" if generic_errors else f"{type(exc).__name__}: {exc}"
         if result.returncode != 0:
+            if generic_errors:
+                return "", "GitHub request failed"
             detail = " ".join((result.stderr or result.stdout or "").split())
             return "", detail[:500] or f"gh api exit {result.returncode}"
         return result.stdout or "", None
+
+    def get_for_token(self, token: str, endpoint: str) -> tuple[Any, Optional[str]]:
+        """Read GitHub.com with exactly this token; never use ambient auth fallback."""
+        if not isinstance(token, str) or not token:
+            return None, "authorized credential unavailable"
+        env = os.environ.copy()
+        for name in ("GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+            env.pop(name, None)
+        env["GH_TOKEN"] = token
+        env["GH_HOST"] = "github.com"
+        try:
+            text, error = self._invoke(
+                ["--hostname", "github.com", "-H", "Accept: application/vnd.github+json", endpoint],
+                env=env,
+                generic_errors=True,
+            )
+        finally:
+            env.pop("GH_TOKEN", None)
+            env.pop("GH_HOST", None)
+        if error:
+            return None, error
+        try:
+            return json.loads(text), None
+        except (TypeError, json.JSONDecodeError):
+            return None, "GitHub response unreadable"
 
     @staticmethod
     def _json(text: str) -> tuple[Any, Optional[str]]:

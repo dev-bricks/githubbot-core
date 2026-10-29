@@ -117,7 +117,7 @@ not a silent override. `permissions.enabled` must stay inside the ceiling.
 | `actions.dispatch` | disabled | `POST …/actions/workflows/{workflow}/dispatches` for an active workflow |
 | `actions.rerun` | disabled | `POST …/actions/runs/{id}/rerun` for a completed, non-fork run of the exact `sha` |
 | `pr.create` | disabled | `POST …/pulls` from a bot-prefixed branch onto the default branch |
-| `git.push_branch` | disabled | `git push origin <sha>:refs/heads/<branch>` without force, bot prefix only (`typed_actions.push_branch_prefix`, default `bot/`), never the default branch, verified with `ls-remote` |
+| `git.push_branch` | disabled | `git push origin <sha>:refs/heads/<branch>` without force, bot prefix only (`typed_actions.push_branch_prefix`, default `bot/`), never the default branch. Requires `multi_bot.merge_account` and the existing `GH_TOKEN` credential reader; the same token is checked against that account before Git runs. Only one exact HTTPS `github.com/<owner>/<repo>` fetch and push URL is accepted. Per-call AskPass disables credential-helper fallback; readback must match the exact SHA and ref. |
 
 The eight typed actions sit in the default ceiling but are never enabled by default. Each one also
 needs its `multi_bot` switch (`merge_enabled`, `policy.draft_*`, `policy.trigger_missing_ci`,

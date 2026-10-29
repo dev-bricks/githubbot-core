@@ -11,9 +11,16 @@ its ``multi_bot`` switch, so a permission alone opens nothing.
 from __future__ import annotations
 
 import re
+import os
 import subprocess
+import sys
+import tempfile
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
+
+from .credentials import CredentialUnavailable, EnvTokenProvider, resolve_token
 
 SHA = re.compile(r"[0-9a-f]{40}")
 REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -113,6 +120,10 @@ def param_denial(kind: str, params: dict, config: dict) -> Optional[str]:
             return "body must be nonempty review text of at most 65536 characters"
         if not str((config.get("multi_bot") or {}).get("merge_account") or "").strip():
             return "pr.review requires the configured multi_bot.merge_account"
+    if kind == "git.push_branch":
+        account = (config.get("multi_bot") or {}).get("merge_account")
+        if not isinstance(account, str) or not account.strip():
+            return "git.push_branch requires the configured multi_bot.merge_account"
     if kind == "pr.merge" and params.get("method", "merge") not in MERGE_METHODS:
         return f"method must be one of {list(MERGE_METHODS)}"
     if kind == "actions.dispatch":
@@ -458,38 +469,254 @@ def exec_create_pr(transport, params: dict, config: dict):
     return {"readback": {"number": data["number"], "url": data.get("html_url")}}, None
 
 
-def _run_git(path: str, *args: str) -> tuple[str, Optional[str]]:
-    result = _git(["git", "-C", path, *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
+def _git_auth_config(repo: str) -> tuple[str, ...]:
+    """Clear every Git credential/header source that could bypass the askpass token."""
+    owner = repo.split("/", 1)[0]
+    scopes = (
+        "https://github.com",
+        "https://github.com/",
+        f"https://github.com/{owner}",
+        f"https://github.com/{owner}/",
+        f"https://github.com/{repo}",
+        f"https://github.com/{repo}/",
+        f"https://github.com/{repo}.git",
+    )
+    args = [
+        "-c",
+        "credential.helper=",
+        "-c",
+        "http.extraHeader=",
+        "-c",
+        "http.sslVerify=true",
+        "-c",
+        "http.followRedirects=false",
+        "-c",
+        "http.sslCert=",
+        "-c",
+        "http.sslKey=",
+        "-c",
+        "http.cookieFile=",
+    ]
+    for scope in scopes:
+        for setting in (
+            f"credential.{scope}.helper=",
+            f"http.{scope}.extraheader=",
+            f"http.{scope}.sslverify=true",
+            f"http.{scope}.followredirects=false",
+            f"http.{scope}.sslcert=",
+            f"http.{scope}.sslkey=",
+            f"http.{scope}.cookiefile=",
+        ):
+            args.extend(("-c", setting))
+    return tuple(args)
+
+
+def _git_base_environment() -> dict[str, str]:
+    """Isolate Git path/auth overrides while preserving one config view for all checks."""
+    env = os.environ.copy()
+    for name in tuple(env):
+        if (
+            name
+            in (
+                "GIT_DIR",
+                "GIT_WORK_TREE",
+                "GIT_COMMON_DIR",
+                "GIT_INDEX_FILE",
+                "GIT_PREFIX",
+                "GIT_ASKPASS",
+                "SSH_ASKPASS",
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
+                "GH_ENTERPRISE_TOKEN",
+                "GITHUB_ENTERPRISE_TOKEN",
+                "GIT_CURL_VERBOSE",
+                "GCM_INTERACTIVE",
+                "GIT_SSL_NO_VERIFY",
+                "GIT_SSL_CAINFO",
+                "GIT_SSL_CAPATH",
+                "GIT_SSL_CERT",
+                "GIT_SSL_KEY",
+            )
+            or name.startswith("GIT_CONFIG")
+            or name.startswith("GIT_TRACE")
+        ):
+            env.pop(name, None)
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    return env
+
+
+@contextmanager
+def _git_auth_environment(token: str, account: str):
+    """Prepare a short-lived, secret-free AskPass helper and a process-only env."""
+    with tempfile.TemporaryDirectory(prefix="githubbot-git-askpass-") as temp_dir:
+        root = Path(temp_dir)
+        helper = root / ("askpass.cmd" if os.name == "nt" else "askpass")
+        script = root / "askpass.py"
+        script.write_text(
+            "import os, sys\n"
+            "prompt = ' '.join(sys.argv[1:]).casefold()\n"
+            "name = 'GITHUBBOT_GIT_USERNAME' if 'username' in prompt else 'GITHUBBOT_GIT_TOKEN'\n"
+            "value = os.environ.get(name, '')\n"
+            "if not value:\n"
+            "    raise SystemExit(1)\n"
+            "sys.stdout.write(value)\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        if os.name == "nt":
+            helper.write_text(
+                '@echo off\r\n"%GITHUBBOT_ASKPASS_PYTHON%" "%~dp0askpass.py" %*\r\nexit /b %ERRORLEVEL%\r\n',
+                encoding="utf-8",
+                newline="",
+            )
+        else:
+            helper.write_text(
+                '#!/bin/sh\nexec "$GITHUBBOT_ASKPASS_PYTHON" "$(dirname "$0")/askpass.py" "$@"\n',
+                encoding="utf-8",
+                newline="\n",
+            )
+            helper.chmod(0o700)
+
+        env = _git_base_environment()
+        env.update(
+            {
+                "GIT_ASKPASS": str(helper),
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GITHUBBOT_ASKPASS_PYTHON": sys.executable,
+                "GITHUBBOT_GIT_USERNAME": account,
+                "GITHUBBOT_GIT_TOKEN": token,
+            }
+        )
+        try:
+            yield env
+        finally:
+            for name in ("GITHUBBOT_GIT_TOKEN", "GITHUBBOT_GIT_USERNAME"):
+                env.pop(name, None)
+
+
+def _run_git(
+    path: str,
+    *args: str,
+    env: Optional[dict[str, str]] = None,
+    repo: Optional[str] = None,
+) -> tuple[str, Optional[str]]:
+    command = ["git", "-C", path]
+    if env is not None:
+        command.extend(_git_auth_config(repo or ""))
+    command.extend(args)
+    run_env = env.copy() if env is not None else _git_base_environment()
+    try:
+        result = _git(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            env=run_env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "", "git command failed"
+    except Exception:
+        return "", "git command failed"
     if result.returncode:
-        return "", " ".join((result.stderr or result.stdout or "").split())[:500] or f"git exit {result.returncode}"
-    return result.stdout.strip(), None
+        return "", f"git command failed (exit {result.returncode})"
+    return (result.stdout or "").strip(), None
 
 
 def _same_repo(url: str, repo: str) -> bool:
-    url = url.strip().removesuffix(".git").removesuffix("/").casefold()
-    return url.endswith("github.com/" + repo.casefold()) or url.endswith("github.com:" + repo.casefold())
+    if not REPO.fullmatch(repo):
+        return False
+    try:
+        parsed = urlsplit(url.strip())
+        if (
+            parsed.scheme.casefold() != "https"
+            or (parsed.hostname or "").casefold() != "github.com"
+            or parsed.netloc.casefold() != "github.com"
+            or parsed.port is not None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or "?" in url
+            or "#" in url
+            or "%" in parsed.path
+        ):
+            return False
+    except ValueError:
+        return False
+    path = parsed.path.removesuffix(".git")
+    return path == f"/{repo}"
+
+
+def _exact_remote_ref(output: str, sha: str, ref: str) -> bool:
+    lines = [line for line in output.splitlines() if line]
+    if len(lines) != 1:
+        return False
+    fields = lines[0].split("\t")
+    return len(fields) == 2 and fields == [sha, ref]
 
 
 def exec_push_branch(transport, params: dict, config: dict):
     repo, branch, sha, path = params["repo"], params["branch"], params["sha"], params["path"]
-    default, error = _default_branch(transport, repo)
-    if error:
-        return None, error
+    account = str((config.get("multi_bot") or {}).get("merge_account") or "").strip()
+    if not account:
+        return None, "git.push_branch requires the configured multi_bot.merge_account"
+    try:
+        token, _provider = resolve_token([EnvTokenProvider(names=("GH_TOKEN",))])
+    except CredentialUnavailable:
+        return None, "authorized bot credential unavailable"
+    except Exception:
+        return None, "authorized bot credential unavailable"
+    get_for_token = getattr(transport, "get_for_token", None)
+    if not callable(get_for_token):
+        return None, "account-bound GitHub transport unavailable"
+    try:
+        user, error = get_for_token(token, "user")
+    except Exception:
+        return None, "configured bot identity unreadable"
+    if error or not isinstance(user, dict) or user.get("login") != account:
+        return None, "credential identity does not match the configured bot account"
+    try:
+        repository, error = get_for_token(token, f"repos/{repo}")
+    except Exception:
+        return None, "target repository unreadable for the configured bot account"
+    if error or not isinstance(repository, dict) or not isinstance(repository.get("default_branch"), str):
+        return None, "target repository unreadable for the configured bot account"
+    default = repository["default_branch"]
     if branch == default:
         return None, "never pushes the default branch"
-    url, error = _run_git(path, "remote", "get-url", "origin")
-    if error or not _same_repo(url, repo):
+    fetch_urls, error = _run_git(path, "remote", "get-url", "--all", "origin")
+    if error:
+        return None, "origin of the checkout is not the target repository"
+    push_urls, error = _run_git(path, "remote", "get-url", "--push", "--all", "origin")
+    if error:
+        return None, "origin of the checkout is not the target repository"
+    if len(fetch_urls.splitlines()) != 1 or len(push_urls.splitlines()) != 1:
+        return None, "origin of the checkout is not the target repository"
+    if not _same_repo(fetch_urls, repo) or not _same_repo(push_urls, repo):
         return None, "origin of the checkout is not the target repository"
     resolved, error = _run_git(path, "rev-parse", "--verify", f"{sha}^{{commit}}")
     if error or resolved != sha:
         return None, "commit not present in the checkout"
-    # No '+' refspec and no --force: a non-fast-forward is rejected by git itself.
-    _, error = _run_git(path, "push", "origin", f"{sha}:refs/heads/{branch}")
-    if error:
-        return None, error
-    remote, error = _run_git(path, "ls-remote", "origin", f"refs/heads/{branch}")
-    if error or not remote.startswith(sha):
-        return None, "push not confirmed by ls-remote"
+    checked_branch, error = _run_git(path, "check-ref-format", "--branch", branch)
+    if error or checked_branch != branch:
+        return None, "branch ref is invalid"
+    ref = f"refs/heads/{branch}"
+    try:
+        with _git_auth_environment(token, account) as env:
+            # No '+' refspec and no --force: a non-fast-forward is rejected by git itself.
+            _, error = _run_git(path, "push", "origin", f"{sha}:{ref}", env=env, repo=repo)
+            if error:
+                return None, "git push failed or its outcome is unknown; read the target before retrying"
+            remote, error = _run_git(path, "ls-remote", "--exit-code", "origin", ref, env=env, repo=repo)
+            if error or not _exact_remote_ref(remote, sha, ref):
+                return None, "push readback is unconfirmed; read the target before retrying"
+    except Exception:
+        return None, "account-bound Git transport failed; read the target before retrying"
     return {"readback": {"branch": branch, "sha": sha}}, None
 
 
