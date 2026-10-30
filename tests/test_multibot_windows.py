@@ -39,6 +39,7 @@ def test_success_and_failure_wait_for_key_then_keep_exitcode(tmp_path, code):
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     try:
         time.sleep(1)
@@ -68,5 +69,6 @@ def test_explicit_dry_or_no_pause_skips_wait(tmp_path, opt):
         text=True,
         encoding="utf-8",
         timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 23 and "[TEST]" in result.stdout and not result.stderr

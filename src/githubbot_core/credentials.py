@@ -58,6 +58,7 @@ class GhCliTokenProvider:
                 encoding="utf-8",
                 errors="replace",
                 timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except (OSError, subprocess.TimeoutExpired):
             return None
