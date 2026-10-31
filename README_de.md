@@ -119,7 +119,7 @@ stille Überschreibung. `permissions.enabled` muss innerhalb der Obergrenze blei
 | `actions.dispatch` | aus | `POST …/actions/workflows/{workflow}/dispatches` für einen aktiven Workflow |
 | `actions.rerun` | aus | `POST …/actions/runs/{id}/rerun` für einen abgeschlossenen Lauf des exakten `sha`, nie aus Forks |
 | `pr.create` | aus | `POST …/pulls` von einem Branch mit Bot-Präfix auf den Default-Branch |
-| `git.push_branch` | aus | `git push origin <sha>:refs/heads/<branch>` ohne Force, nur Bot-Präfix (`typed_actions.push_branch_prefix`, Standard `bot/`), nie der Default-Branch, Prüfung per `ls-remote` |
+| `git.push_branch` | aus | `git push origin <sha>:refs/heads/<branch>` ohne Force, nur Bot-Präfix (`typed_actions.push_branch_prefix`, Standard `bot/`), nie der Default-Branch. Benötigt `multi_bot.merge_account` und den vorhandenen `GH_TOKEN`-Credential-Reader; derselbe Token wird vor Git gegen dieses Konto geprüft. Zulässig ist genau eine passende HTTPS-Fetch- und Push-URL auf `github.com/<owner>/<repo>`. AskPass gilt nur für den Aufruf und schaltet Credential-Helper-Fallbacks ab; das Rücklesen muss exakt SHA und Ref bestätigen. |
 
 Die acht getypten Aktionen stehen in der Standard-Obergrenze, sind aber nie standardmäßig aktiv.
 Jede braucht zusätzlich ihren `multi_bot`-Schalter (`merge_enabled`, `policy.draft_*`,

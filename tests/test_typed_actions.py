@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -10,7 +13,9 @@ import pytest
 from githubbot_core import actions, cli, typed_actions
 from githubbot_core.actions import Action
 from githubbot_core.config import default_config, merge_layers
+from githubbot_core.credentials import EnvTokenProvider, resolve_token
 from githubbot_core.multibot import permission_contract
+from githubbot_core.transport import GhCliTransport
 
 REPO = "example-org/example-repo"
 SHA = "a" * 40
@@ -60,6 +65,19 @@ class Transport:
         return self.write_result, None
 
 
+class TokenTransport(Transport):
+    def __init__(self, gets, *, login="example-bot"):
+        super().__init__(gets)
+        self.login = login
+        self.token_reads = []
+
+    def get_for_token(self, token, endpoint):
+        self.token_reads.append((token, endpoint))
+        if endpoint == "user":
+            return {"login": self.login}, None
+        return self.get(endpoint)
+
+
 def base_gets(**pull_overrides):
     return {
         f"repos/{REPO}": {"default_branch": "main"},
@@ -97,6 +115,11 @@ def test_static_parameters_are_checked_in_preview():
     push = {"repo": REPO, "branch": "feature/x", "sha": SHA, "path": "."}
     assert "prefix" in actions.denial_reason(Action("git.push_branch", push), cfg)
     assert "invalid" in actions.denial_reason(Action("git.push_branch", {**push, "branch": "bot/../main"}), cfg)
+    missing_account = config()
+    missing_account["multi_bot"]["merge_account"] = " "
+    assert "merge_account" in actions.denial_reason(
+        Action("git.push_branch", {**push, "branch": "bot/fix"}), missing_account
+    )
 
 
 def test_merge_is_sha_bound_and_read_back():
@@ -250,44 +273,357 @@ def test_create_pr_targets_the_default_branch_from_a_bot_branch():
     assert transport.writes[0][2]["base"] == "main" and transport.writes[0][2]["head"] == "bot/fix"
 
 
-def test_push_branch_never_forces_and_checks_origin(monkeypatch):
+def _mock_push_token(monkeypatch, token="synthetic-bot-token"):
+    seen = []
+
+    def reader(providers):
+        providers = list(providers)
+        seen.append(providers)
+        assert len(providers) == 1
+        assert isinstance(providers[0], EnvTokenProvider)
+        assert providers[0].names == ("GH_TOKEN",)
+        return token, providers[0].name
+
+    monkeypatch.setattr(typed_actions, "resolve_token", reader)
+    return token, seen
+
+
+def _fake_git_output(command, *, origin=None, pushurl=None, readback=None, fail_push=False):
+    op_index = next(
+        i for i, part in enumerate(command) if part in {"remote", "rev-parse", "check-ref-format", "push", "ls-remote"}
+    )
+    op = command[op_index]
+    if op == "remote":
+        if "--push" in command:
+            output = pushurl if pushurl is not None else origin
+        else:
+            output = origin
+    elif op == "rev-parse":
+        output = SHA
+    elif op == "check-ref-format":
+        output = "bot/fix"
+    elif op == "push":
+        if fail_push:
+            return SimpleNamespace(
+                returncode=128, stdout="remote rejected synthetic-bot-token", stderr="auth synthetic-bot-token"
+            )
+        output = ""
+    else:
+        output = readback if readback is not None else f"{SHA}\trefs/heads/bot/fix\n"
+    return SimpleNamespace(returncode=0, stdout=f"{output}\n" if output else "", stderr="")
+
+
+def _push_action(branch="bot/fix"):
+    return Action("git.push_branch", {"repo": REPO, "branch": branch, "sha": SHA, "path": "."})
+
+
+def _push_transport(login="example-bot"):
+    return TokenTransport({f"repos/{REPO}": {"default_branch": "main"}}, login=login)
+
+
+def test_push_branch_uses_same_bot_token_exact_remote_and_exact_readback(monkeypatch):
+    token, readers = _mock_push_token(monkeypatch)
+    calls = []
+    temp_dirs = []
+
+    def git(cmd, **kwargs):
+        if "GITHUBBOT_GIT_TOKEN" in kwargs.get("env", {}):
+            env = kwargs["env"]
+            helper = env["GIT_ASKPASS"]
+            temp_dirs.append(os.path.dirname(helper))
+            assert "GH_TOKEN" not in env and "GITHUB_TOKEN" not in env
+            assert env["GITHUBBOT_GIT_TOKEN"] == token
+            assert env["GIT_TERMINAL_PROMPT"] == "0"
+            assert all(token not in arg for arg in cmd)
+            assert token not in Path(helper).read_text(encoding="utf-8")
+            assert "credential.helper=" in cmd
+            assert "http.extraHeader=" in cmd
+        calls.append((cmd, kwargs))
+        return _fake_git_output(
+            cmd,
+            origin=f"https://github.com/{REPO}.git",
+            pushurl=f"https://github.com/{REPO}.git",
+        )
+
+    monkeypatch.setattr(typed_actions, "_git", git)
+    transport = _push_transport()
+    receipt = actions.apply([_push_action()], transport, config())["receipts"][0]
+    assert receipt["status"] == "applied"
+    # Both API preflights use the token resolved by the one GH_TOKEN-only provider.
+    assert transport.token_reads == [(token, "user"), (token, f"repos/{REPO}")]
+    assert len(readers[0]) == 1
+    push = next(cmd for cmd, _ in calls if "push" in cmd)
+    assert push[push.index("push") + 1 :] == ["origin", f"{SHA}:refs/heads/bot/fix"]
+    assert not any(arg.startswith("+") or "force" in arg for cmd, _ in calls for arg in cmd)
+    assert temp_dirs and all(not os.path.exists(directory) for directory in temp_dirs)
+
+
+def test_push_branch_fails_closed_for_wrong_identity_or_missing_credential(monkeypatch):
+    _mock_push_token(monkeypatch)
+    calls = []
+    monkeypatch.setattr(typed_actions, "_git", lambda cmd, **kwargs: calls.append(cmd))
+    wrong_identity = actions.apply([_push_action()], _push_transport("lukisch"), config())["receipts"][0]
+    assert wrong_identity["status"] == "failed"
+    assert "identity" in wrong_identity["detail"]
+    assert calls == []
+
+    def missing_reader(providers):
+        providers = list(providers)
+        assert len(providers) == 1 and providers[0].names == ("GH_TOKEN",)
+        return resolve_token([EnvTokenProvider(names=("GH_TOKEN",), environ={})])
+
+    monkeypatch.setattr(typed_actions, "resolve_token", missing_reader)
+    missing = actions.apply([_push_action()], _push_transport(), config())["receipts"][0]
+    assert missing["status"] == "failed"
+    assert "credential unavailable" in missing["detail"]
+    assert calls == []
+
+
+def test_push_branch_rejects_bad_prefix_before_git_or_credential_lookup(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        typed_actions, "resolve_token", lambda _: (_ for _ in ()).throw(AssertionError("reader called"))
+    )
+    monkeypatch.setattr(typed_actions, "_git", lambda cmd, **kwargs: calls.append(cmd))
+    action = _push_action(branch="feature/x")
+    receipt = actions.apply([action], _push_transport(), config())["receipts"][0]
+    assert receipt["status"] == "denied"
+    assert "prefix" in receipt["detail"]
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "origin,pushurl",
+    [
+        ("https://github.com.attacker.invalid/example-org/example-repo.git", None),
+        ("https://github.com/other/repo.git", None),
+        ("https://token@github.com/example-org/example-repo.git", None),
+        (f"https://github.com:443/{REPO}.git", None),
+        (f"https://github.com/{REPO}.git?", None),
+        (f"git@github.com:{REPO}.git", None),
+        (f"https://github.com/{REPO}.git", "https://github.com/other/repo.git"),
+    ],
+)
+def test_push_branch_rejects_unbound_origin_and_pushurl(monkeypatch, origin, pushurl):
+    _mock_push_token(monkeypatch)
     calls = []
 
     def git(cmd, **kwargs):
-        calls.append(cmd[3:])
-        out = {
-            "remote": f"https://github.com/{REPO}.git\n",
-            "rev-parse": SHA + "\n",
-            "push": "",
-            "ls-remote": f"{SHA}\trefs/heads/bot/fix\n",
-        }[cmd[3]]
-        return SimpleNamespace(returncode=0, stdout=out, stderr="")
+        calls.append(cmd)
+        return _fake_git_output(cmd, origin=origin, pushurl=pushurl)
 
     monkeypatch.setattr(typed_actions, "_git", git)
-    action = Action("git.push_branch", {"repo": REPO, "branch": "bot/fix", "sha": SHA, "path": "."})
-    transport = Transport({f"repos/{REPO}": {"default_branch": "main"}})
-    receipt = actions.apply([action], transport, config())["receipts"][0]
-    assert receipt["status"] == "applied"
-    push = next(c for c in calls if c[0] == "push")
-    assert push == ["push", "origin", f"{SHA}:refs/heads/bot/fix"]
-    assert not any(arg.startswith("+") or "force" in arg for c in calls for arg in c)
+    receipt = actions.apply([_push_action()], _push_transport(), config())["receipts"][0]
+    assert receipt["status"] == "failed"
+    assert not any("push" in cmd for cmd in calls)
 
-    calls.clear()
-    monkeypatch.setattr(
-        typed_actions,
-        "_git",
-        lambda cmd, **k: SimpleNamespace(returncode=0, stdout="https://github.com/other/repo\n", stderr=""),
-    )
-    assert actions.apply([action], transport, config())["receipts"][0]["status"] == "failed"
+
+def test_push_branch_rejects_empty_port_separator_remote(monkeypatch):
+    _mock_push_token(monkeypatch)
+    calls = []
+
+    def git(cmd, **kwargs):
+        calls.append(cmd)
+        return _fake_git_output(cmd, origin=f"https://github.com:/{REPO}.git")
+
+    monkeypatch.setattr(typed_actions, "_git", git)
+    receipt = actions.apply([_push_action()], _push_transport(), config())["receipts"][0]
+    assert receipt["status"] == "failed"
+    assert "origin of the checkout" in receipt["detail"]
+    assert not any("push" in cmd for cmd in calls)
+
+
+@pytest.mark.parametrize(
+    "readback",
+    [
+        f"{SHA}\trefs/heads/bot/other\n",
+        f"{OTHER}\trefs/heads/bot/fix\n",
+        f"{SHA}\trefs/heads/bot/fix\n{OTHER}\trefs/heads/bot/other\n",
+    ],
+)
+def test_push_branch_rejects_wrong_readback_oid_or_ref(monkeypatch, readback):
+    _mock_push_token(monkeypatch)
+    calls = []
+
+    def git(cmd, **kwargs):
+        calls.append(cmd)
+        return _fake_git_output(
+            cmd,
+            origin=f"https://github.com/{REPO}.git",
+            pushurl=f"https://github.com/{REPO}.git",
+            readback=readback,
+        )
+
+    monkeypatch.setattr(typed_actions, "_git", git)
+    receipt = actions.apply([_push_action()], _push_transport(), config())["receipts"][0]
+    assert receipt["status"] == "failed"
+    assert "read the target before retrying" in receipt["detail"]
+    assert any("push" in cmd for cmd in calls)
+
+
+def test_push_branch_redacts_secret_like_git_errors(monkeypatch, caplog):
+    token, _ = _mock_push_token(monkeypatch)
+    temp_dirs = []
+
+    def git(cmd, **kwargs):
+        if "GITHUBBOT_GIT_TOKEN" in kwargs.get("env", {}):
+            temp_dirs.append(os.path.dirname(kwargs["env"]["GIT_ASKPASS"]))
+        return _fake_git_output(
+            cmd,
+            origin=f"https://github.com/{REPO}.git",
+            pushurl=f"https://github.com/{REPO}.git",
+            fail_push="push" in cmd,
+        )
+
+    monkeypatch.setattr(typed_actions, "_git", git)
+    receipt = actions.apply([_push_action()], _push_transport(), config())["receipts"][0]
+    assert receipt["status"] == "failed"
+    assert token not in receipt["detail"] and token not in caplog.text
+    assert "git process exited with code 128" in receipt["detail"]
+    assert "read the target before retrying" in receipt["detail"]
+    assert temp_dirs and all(not os.path.exists(directory) for directory in temp_dirs)
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        ("start", "git process could not start (FileNotFoundError)"),
+        ("timeout", "git process timed out"),
+        ("exit", "git process exited with code 128"),
+    ],
+)
+def test_push_failure_receipt_reports_only_safe_process_category(monkeypatch, caplog, failure, expected):
+    token, _ = _mock_push_token(monkeypatch)
+    temp_dirs = []
+
+    def git(cmd, **kwargs):
+        if "push" in cmd:
+            temp_dirs.append(Path(kwargs["env"]["GIT_ASKPASS"]).parent)
+            if failure == "start":
+                raise FileNotFoundError(f"synthetic credential-shaped text {token}")
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(
+                    cmd, timeout=120, output=f"synthetic {token}", stderr=f"rejected {token}"
+                )
+            return SimpleNamespace(
+                returncode=128,
+                stdout=f"remote rejected {token}",
+                stderr=f"authentication failed {token}",
+            )
+        return _fake_git_output(
+            cmd,
+            origin=f"https://github.com/{REPO}.git",
+            pushurl=f"https://github.com/{REPO}.git",
+        )
+
+    monkeypatch.setattr(typed_actions, "_git", git)
+    receipt = actions.apply([_push_action()], _push_transport(), config())["receipts"][0]
+    assert receipt["status"] == "failed"
+    assert expected in receipt["detail"]
+    assert "read the target before retrying" in receipt["detail"]
+    assert token not in receipt["detail"] and token not in caplog.text
+    assert temp_dirs and all(not directory.exists() for directory in temp_dirs)
+
+
+def test_git_base_environment_removes_ambient_auth_and_repo_overrides(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "synthetic-ambient-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "synthetic-ambient-token")
+    monkeypatch.setenv("GIT_DIR", "wrong-repository")
+    monkeypatch.setenv("GIT_WORK_TREE", "wrong-worktree")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_TRACE", "2")
+    env = typed_actions._git_base_environment()
+    assert "GH_TOKEN" not in env and "GITHUB_TOKEN" not in env
+    assert "GIT_DIR" not in env and "GIT_WORK_TREE" not in env
+    assert "GIT_CONFIG_COUNT" not in env and "GIT_TRACE" not in env
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+
+
+def test_git_askpass_helper_uses_child_env_and_cleans_tempfiles(monkeypatch, tmp_path):
+    token = "synthetic-askpass-token"
+    directory = None
+    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "invalid-pythonhome"))
+    with typed_actions._git_auth_environment(token, "example-bot") as env:
+        helper = Path(env["GIT_ASKPASS"])
+        directory = helper.parent
+        script = helper.with_name("askpass.py")
+        source = script.read_text(encoding="utf-8")
+        assert token not in source
+        commands = []
+
+        def run_askpass(prompt):
+            if os.name == "nt":
+                args = f'call "{helper}" "{prompt}"'
+                command = args
+                shell = True
+            else:
+                args = [str(helper), prompt]
+                command = args
+                shell = False
+            commands.append(args)
+            return subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=env,
+                shell=shell,
+                check=True,
+            )
+
+        username = run_askpass("Username for https://github.com:")
+        password = run_askpass("Password for https://github.com:")
+        assert username.stdout == "example-bot"
+        assert password.stdout == token
+        assert env["PYTHONHOME"].endswith("invalid-pythonhome")
+        assert all(token not in str(command) for command in commands)
+    assert directory is not None and not directory.exists()
+
+
+def test_transport_reads_identity_with_exact_token_without_argv_or_raw_error():
+    token = "synthetic-api-token"
+    seen = []
+
+    def runner(command, **kwargs):
+        seen.append((command, kwargs, kwargs["env"].get("GH_TOKEN"), "GITHUB_TOKEN" in kwargs["env"]))
+        return SimpleNamespace(returncode=1, stdout=f"{token}", stderr=f"failed {token}")
+
+    transport = GhCliTransport(runner=runner)
+    user, error = transport.get_for_token(token, "user")
+    assert user is None and error == "GitHub request failed"
+    command, kwargs, child_token, has_ambiguous_token = seen[0]
+    assert "--hostname" in command and "github.com" in command
+    assert all(token not in arg for arg in command)
+    assert child_token == token
+    assert not has_ambiguous_token
+    assert "GH_TOKEN" not in kwargs["env"]
+
+
+def test_transport_invoke_preserves_legacy_args_and_stdin_call_shapes():
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        assert "env" not in kwargs
+        return SimpleNamespace(returncode=0, stdout='{"ok":true}', stderr="")
+
+    transport = GhCliTransport(runner=runner)
+    assert transport._invoke(["user"]) == ('{"ok":true}', None)
+    assert transport._invoke(["user"], "request-body") == ('{"ok":true}', None)
+    assert calls[0][1]["input"] is None
+    assert calls[1][1]["input"] == "request-body"
 
 
 def test_push_branch_refuses_the_default_branch_even_with_bot_prefix(monkeypatch):
+    _mock_push_token(monkeypatch)
     monkeypatch.setattr(typed_actions, "_git", lambda *a, **k: (_ for _ in ()).throw(AssertionError("git called")))
     cfg = config()
     cfg["typed_actions"] = {"push_branch_prefix": "release"}
     action = Action("git.push_branch", {"repo": REPO, "branch": "release/main", "sha": SHA, "path": "."})
-    transport = Transport({f"repos/{REPO}": {"default_branch": "release/main"}})
-    assert actions.apply([action], transport, cfg)["receipts"][0]["status"] == "failed"
+    transport = TokenTransport({f"repos/{REPO}": {"default_branch": "release/main"}})
+    receipt = actions.apply([action], transport, cfg)["receipts"][0]
+    assert receipt["status"] == "failed" and "never pushes" in receipt["detail"]
 
 
 def test_run_contract_reports_effective_enabled(tmp_path):
