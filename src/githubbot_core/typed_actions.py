@@ -491,10 +491,6 @@ def _git_auth_config(repo: str) -> tuple[str, ...]:
         "-c",
         "http.followRedirects=false",
         "-c",
-        "http.sslCert=",
-        "-c",
-        "http.sslKey=",
-        "-c",
         "http.cookieFile=",
     ]
     for scope in scopes:
@@ -503,8 +499,6 @@ def _git_auth_config(repo: str) -> tuple[str, ...]:
             f"http.{scope}.extraheader=",
             f"http.{scope}.sslverify=true",
             f"http.{scope}.followredirects=false",
-            f"http.{scope}.sslcert=",
-            f"http.{scope}.sslkey=",
             f"http.{scope}.cookiefile=",
         ):
             args.extend(("-c", setting))
@@ -544,6 +538,28 @@ def _git_base_environment() -> dict[str, str]:
     env["GIT_CONFIG_NOSYSTEM"] = "1"
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     return env
+
+
+def _client_certificate_policy_error(path: str) -> str | None:
+    """Reject local TLS client credentials instead of passing invalid empty file paths.
+
+    System/global config and certificate environment overrides are already excluded
+    by _git_base_environment. Includes are evaluated, but only key names are read.
+    """
+    try:
+        result = _git(
+            ["git", "-C", path, "config", "--includes", "--name-only", "--get-regexp",
+             r"^http(\..*)?\.ssl(cert|key)$"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120, env=_git_base_environment(),
+        )
+    except Exception:
+        return "local Git client-certificate policy could not be checked"
+    if result.returncode == 1 and not (result.stdout or "").strip():
+        return None
+    if result.returncode == 0:
+        return "local Git client-certificate configuration is not allowed for bot transport"
+    return "local Git client-certificate policy could not be checked"
 
 
 @contextmanager
@@ -708,6 +724,9 @@ def exec_push_branch(transport, params: dict, config: dict):
     if error or checked_branch != branch:
         return None, "branch ref is invalid"
     ref = f"refs/heads/{branch}"
+    certificate_error = _client_certificate_policy_error(path)
+    if certificate_error:
+        return None, certificate_error
     try:
         with _git_auth_environment(token, account) as env:
             # No '+' refspec and no --force: a non-fast-forward is rejected by git itself.
