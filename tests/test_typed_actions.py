@@ -290,7 +290,9 @@ def _mock_push_token(monkeypatch, token="synthetic-bot-token"):
 
 def _fake_git_output(command, *, origin=None, pushurl=None, readback=None, fail_push=False):
     op_index = next(
-        i for i, part in enumerate(command) if part in {"remote", "rev-parse", "check-ref-format", "push", "ls-remote", "config"}
+        i
+        for i, part in enumerate(command)
+        if part in {"remote", "rev-parse", "check-ref-format", "push", "ls-remote", "config"}
     )
     op = command[op_index]
     if op == "config":

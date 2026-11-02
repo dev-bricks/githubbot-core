@@ -548,10 +548,13 @@ def _client_certificate_policy_error(path: str) -> str | None:
     """
     try:
         result = _git(
-            ["git", "-C", path, "config", "--includes", "--name-only", "--get-regexp",
-             r"^http(\..*)?\.ssl(cert|key)$"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=120, env=_git_base_environment(),
+            ["git", "-C", path, "config", "--includes", "--name-only", "--get-regexp", r"^http(\..*)?\.ssl(cert|key)$"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            env=_git_base_environment(),
         )
     except Exception:
         return "local Git client-certificate policy could not be checked"
