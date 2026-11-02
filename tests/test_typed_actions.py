@@ -290,9 +290,13 @@ def _mock_push_token(monkeypatch, token="synthetic-bot-token"):
 
 def _fake_git_output(command, *, origin=None, pushurl=None, readback=None, fail_push=False):
     op_index = next(
-        i for i, part in enumerate(command) if part in {"remote", "rev-parse", "check-ref-format", "push", "ls-remote"}
+        i
+        for i, part in enumerate(command)
+        if part in {"remote", "rev-parse", "check-ref-format", "push", "ls-remote", "config"}
     )
     op = command[op_index]
+    if op == "config":
+        return SimpleNamespace(returncode=1, stdout="", stderr="")
     if op == "remote":
         if "--push" in command:
             output = pushurl if pushurl is not None else origin
@@ -377,6 +381,21 @@ def test_push_branch_fails_closed_for_wrong_identity_or_missing_credential(monke
     assert missing["status"] == "failed"
     assert "credential unavailable" in missing["detail"]
     assert calls == []
+
+
+def test_push_branch_stops_before_network_push_for_client_certificate_policy(monkeypatch):
+    _mock_push_token(monkeypatch)
+    calls = []
+
+    def git(cmd, **kwargs):
+        calls.append(cmd)
+        return _fake_git_output(cmd, origin=f"https://github.com/{REPO}.git")
+
+    monkeypatch.setattr(typed_actions, "_git", git)
+    monkeypatch.setattr(typed_actions, "_client_certificate_policy_error", lambda path: "certificate policy denied")
+    receipt = actions.apply([_push_action()], _push_transport(), config())["receipts"][0]
+    assert receipt["status"] == "failed" and "certificate policy denied" in receipt["detail"]
+    assert not any("push" in cmd or "ls-remote" in cmd for cmd in calls)
 
 
 def test_push_branch_rejects_bad_prefix_before_git_or_credential_lookup(monkeypatch):
