@@ -267,7 +267,7 @@ class TestGenerateHealthReport(unittest.TestCase):
 
         self.assertFalse(summary.missing_description)
         self.assertFalse(summary.missing_topics)
-        self.assertTrue(any("API unavailable" in error for error in summary.errors))
+        self.assertTrue(any("GitHub request failed" in error for error in summary.errors))
 
 
 if __name__ == "__main__":

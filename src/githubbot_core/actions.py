@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from . import typed_actions, write_scope
+from .coordination import Coordinator, Hold
 
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -155,14 +156,157 @@ def apply(
             if authority_error:
                 record.update(status="denied", detail=authority_error)
             else:
-                data, error = EXECUTORS[action.kind](transport, action.params, config)
-                writes += 1
-                record.update(status="failed" if error else "applied", detail=error or "")
-                if not error and isinstance(data, dict) and "readback" in data:
-                    record["readback"] = data["readback"]
+                try:
+                    result = _coordinated_action(action, transport, config, digest)
+                    record.update(result)
+                    writes += int(result.pop("attempted", False))
+                    record.pop("attempted", None)
+                except (Hold, OSError):
+                    record.update(
+                        status="failed", detail="coordination HOLD; outcome unconfirmed; do not retry blindly"
+                    )
+
         receipts.append(record)
         if receipt_store is not None:
             receipt_store.parent.mkdir(parents=True, exist_ok=True)
             with receipt_store.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     return {"mode": "apply", "plan_sha256": digest, "receipts": receipts, "writes": writes}
+
+
+def _confirmed_unknown(action, transport, config):
+    """Conservative read-only reconciliation; unsupported effects remain HOLD."""
+    p = action.params
+    account = (config.get("multi_bot") or {}).get("merge_account")
+    if action.kind == "pr.review":
+        rows, error = transport.get_paginated(f"repos/{p['repo']}/pulls/{int(p['number'])}/reviews?per_page=100")
+        if error or not isinstance(rows, list):
+            return None
+        if any(
+            not isinstance(r, dict)
+            or not isinstance(r.get("user"), dict)
+            or not isinstance(r["user"].get("login"), str)
+            or type(r.get("id")) is not int
+            or r["id"] < 1
+            or not typed_actions.SHA.fullmatch(str(r.get("commit_id") or ""))
+            for r in rows
+        ):
+            return None
+        matched = [
+            r
+            for r in rows
+            if isinstance(r, dict)
+            and (r.get("user") or {}).get("login") == account
+            and r.get("commit_id") == p["sha"]
+            and r.get("body") == p["body"]
+            and r.get("state") == typed_actions.REVIEW_STATES[p["event"]]
+            and type(r.get("id")) is int
+            and r["id"] > 0
+        ]
+        pull, error = typed_actions._pull(transport, p["repo"], p["number"])
+        if (
+            len(matched) == 1
+            and not error
+            and pull.get("state") == "open"
+            and type(pull.get("number")) is int
+            and pull["number"] == int(p["number"])
+            and isinstance(pull.get("head"), dict)
+            and pull["head"].get("sha") == p["sha"]
+        ):
+            return {"review_id": matched[0]["id"], "head": p["sha"], "account": account, "state": matched[0]["state"]}
+    if action.kind == "pr.merge":
+        pull, error = typed_actions._pull(transport, p["repo"], p["number"])
+        sha = pull.get("merge_commit_sha")
+        if (
+            not error
+            and pull.get("merged") is True
+            and type(pull.get("number")) is int
+            and pull["number"] == int(p["number"])
+            and isinstance(pull.get("head"), dict)
+            and pull["head"].get("sha") == p["sha"]
+            and typed_actions.SHA.fullmatch(str(sha or ""))
+        ):
+            return {"merged": True, "merge_commit_sha": sha, "head": p["sha"]}
+    return None
+
+
+def _coordinated_action(action, transport, config, digest):
+    coordinator = getattr(transport, "coordinator", None) or Coordinator()
+    # Fixed ordering: operation lock -> transport lock. The parent wrapper must
+    # not retain a transport lock while launching a core child.
+    with coordinator.lock("github-com-actions"):
+        coordinator.check_rate()
+        error = write_scope.transport_denial(transport, action.kind, action.params, config)
+        if error:
+            return {"status": "denied", "detail": error}
+        key = coordinator.action_key(action.action_id)
+        prior = coordinator.load(key)
+        if prior:
+            if (
+                set(prior) != {"schema", "id", "plan", "status"}
+                or prior.get("schema") != "githubbot-core.intent/v1"
+                or not isinstance(prior.get("plan"), str)
+                or len(prior["plan"]) != 64
+                or any(c not in "0123456789abcdef" for c in prior["plan"])
+            ):
+                raise Hold("invalid action journal schema")
+            if prior.get("status") == "applied" and prior.get("id") == action.action_id:
+                return {"status": "skipped_duplicate", "detail": "durable action journal already applied"}
+            if prior.get("status") not in {"inflight", "unknown"} or prior.get("id") != action.action_id:
+                raise Hold("invalid action journal")
+            if prior.get("plan") != digest:
+                raise Hold("unknown action belongs to another plan or authority")
+            readback = _confirmed_unknown(action, transport, config)
+            if readback is None:
+                return {
+                    "status": "failed",
+                    "detail": "unknown write HOLD; readback unavailable or ambiguous; nothing repeated",
+                }
+            coordinator.save(key, {**prior, "status": "applied"})
+            return {
+                "status": "skipped_confirmed",
+                "detail": "unknown write confirmed by read-only reconciliation",
+                "readback": readback,
+            }
+        intent = {"schema": "githubbot-core.intent/v1", "id": action.action_id, "plan": digest, "status": "inflight"}
+        started = False
+
+        def before_effect():
+            nonlocal started
+            if not started:
+                coordinator.save(key, intent)
+                started = True
+
+        class JournalTransport:
+            def __getattr__(self, name):
+                return getattr(transport, name)
+
+            def request(self, method, endpoint, body=None):
+                native = getattr(transport, "request_with_intent", None)
+                if native is not None:
+                    return native(method, endpoint, body, before_effect=before_effect)
+                before_effect()
+                return transport.request(method, endpoint, body)
+
+            def before_git_effect(self):
+                before_effect()
+
+        try:
+            data, error = EXECUTORS[action.kind](JournalTransport(), action.params, config)
+        except Exception:
+            if started:
+                coordinator.save(key, {**intent, "status": "unknown"})
+            return {
+                "status": "failed",
+                "detail": "executor exception; unknown write HOLD"
+                if started
+                else "executor preflight failed; nothing sent",
+                "attempted": started,
+            }
+        if started:
+            coordinator.save(key, {**intent, "status": "unknown" if error else "applied"})
+
+        result = {"status": "failed" if error else "applied", "detail": error or "", "attempted": started}
+        if not error and isinstance(data, dict) and "readback" in data:
+            result["readback"] = data["readback"]
+        return result

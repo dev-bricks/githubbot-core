@@ -139,7 +139,7 @@ def test_integrated_draft_or_stack_can_close_with_exact_readback():
     }
     assert t.writes == [("PATCH", ENDPOINT, {"state": "closed"})]
     assert t.reads.count(ENDPOINT) == 3
-    assert t.reads.count("user") == 3  # central authority check plus both existing close checks
+    assert t.reads.count("user") == 4  # both central checks plus both existing close checks
 
 
 def test_identical_head_and_default_branch_can_close():
@@ -210,15 +210,17 @@ def test_identity_default_branch_movement_and_api_errors_fail_closed():
     assert not t.writes
 
 
-def test_write_timeout_or_readback_race_never_claims_success_or_retries():
+def test_write_timeout_or_readback_race_never_claims_success_or_retries(tmp_path):
     t = Transport()
     t.write_error = "timeout"
     assert apply(t)["receipts"][0]["status"] == "failed"
     assert len(t.writes) == 1
     assert apply(t)["receipts"][0]["status"] == "failed"
     assert len(t.writes) == 1
-    for changes in [{"head": {"sha": OTHER}}, {"merged": True}, {"number": 8}]:
+    for index, changes in enumerate([{"head": {"sha": OTHER}}, {"merged": True}, {"number": 8}]):
+        from githubbot_core.coordination import Coordinator
         t = Transport()
+        t.coordinator = Coordinator(tmp_path / str(index))
         t.readback_changes = changes
         assert apply(t)["receipts"][0]["status"] == "failed"
         assert len(t.writes) == 1

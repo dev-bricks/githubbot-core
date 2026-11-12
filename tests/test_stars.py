@@ -38,7 +38,7 @@ class TestStarsFetcher(unittest.TestCase):
 
         self.assertEqual(result.stars, 0)
         self.assertIsNotNone(result.error)
-        self.assertIn("HTTP 404", result.error)
+        self.assertIn("GitHub request failed", result.error)
 
     @patch("githubbot_core.transport.subprocess.run")
     def test_fetch_records_json_error_detail(self, mock_run):

@@ -15,6 +15,11 @@ import json
 import logging
 import os
 import subprocess
+import re
+from email.utils import parsedate_to_datetime
+from urllib.parse import urlsplit
+
+from .coordination import Coordinator, Hold
 from typing import Any, Callable, Optional, Protocol
 
 logger = logging.getLogger(__name__)
@@ -35,10 +40,12 @@ class Transport(Protocol):
 class GhCliTransport:
     """``gh api`` based transport. Authentication stays with the GitHub CLI."""
 
-    def __init__(self, gh: str = "gh", timeout: int = 60, runner: Optional[Callable] = None):
+    def __init__(self, gh: str = "gh", timeout: int = 60, runner: Optional[Callable] = None, coordinator=None):
         self.gh = gh
         self.timeout = timeout
         self._runner = runner
+        self.coordinator = coordinator or Coordinator()
+        self.response_headers = {}
 
     def _invoke(
         self,
@@ -47,9 +54,43 @@ class GhCliTransport:
         *,
         env: Optional[dict[str, str]] = None,
         generic_errors: bool = False,
+        before_effect=None,
     ) -> tuple[str, Optional[str]]:
-        cmd = [self.gh, "api", "-H", f"X-GitHub-Api-Version: {API_VERSION}", *args]
+        # One persistent host-wide guard, shared across accounts. No retry here.
+        mutation = "--method" in args and args[args.index("--method") + 1].upper() != "GET"
+        if mutation and "graphql" in args and stdin:
+            # Preserve the existing fixed merge readback query without treating
+            # arbitrary GraphQL POSTs as reads or parsing a general query language.
+            from .typed_actions import MERGE_READBACK_QUERY
+
+            try:
+                payload = json.loads(stdin)
+                if isinstance(payload, dict) and payload.get("query") == MERGE_READBACK_QUERY:
+                    mutation = False
+            except (ValueError, TypeError):
+                pass
+        try:
+            with self.coordinator.lock("github-com-transport"):
+                self.coordinator.check_rate(mutation)
+                if mutation and before_effect is not None:
+                    before_effect()
+                return self._invoke_once(args, stdin, env=env, generic_errors=generic_errors)
+        except (Hold, OSError):
+            return "", "GitHub coordination HOLD; no request sent"
+
+    def _invoke_once(self, args, stdin=None, *, env=None, generic_errors=False):
+        cmd = [
+            self.gh,
+            "api",
+            "--hostname",
+            "github.com",
+            "--include",
+            "-H",
+            f"X-GitHub-Api-Version: {API_VERSION}",
+            *args,
+        ]
         run = self._runner or subprocess.run
+        self.response_headers = {}
         try:
             result = run(
                 cmd,
@@ -62,15 +103,60 @@ class GhCliTransport:
                 **({"env": env} if env is not None else {}),
             )
         except subprocess.TimeoutExpired:
-            return "", "GitHub request failed" if generic_errors else "Timeout"
-        except Exception as exc:  # the transport reports, it never raises (callers collect partial errors)
-            return "", "GitHub request failed" if generic_errors else f"{type(exc).__name__}: {exc}"
-        if result.returncode != 0:
-            if generic_errors:
-                return "", "GitHub request failed"
-            detail = " ".join((result.stderr or result.stdout or "").split())
-            return "", detail[:500] or f"gh api exit {result.returncode}"
-        return result.stdout or "", None
+            return "", "GitHub request failed" if generic_errors else "Timeout; outcome unconfirmed"
+        except Exception:
+            return "", "GitHub request failed"
+        stdout = result.stdout or ""
+        status = None
+        if stdout.startswith("HTTP/"):
+            header, separator, stdout = stdout.replace("\r\n", "\n").partition("\n\n")
+            first, *lines = header.splitlines()
+            match = re.fullmatch(r"HTTP/[0-9.]+ ([0-9]{3})(?: .*)?", first)
+            if not separator or not match:
+                return "", "GitHub response headers unreadable; outcome unconfirmed"
+            status = int(match[1])
+            for line in lines:
+                key, colon, value = line.partition(":")
+                if colon and key.lower() in {"retry-after", "x-ratelimit-remaining", "x-ratelimit-reset", "link"}:
+                    if key.lower() in self.response_headers:
+                        return "", "GitHub response headers ambiguous; outcome unconfirmed"
+                    self.response_headers[key.lower()] = value.strip()
+        elif self._runner is None and "--method" in args:
+            return "", "GitHub response headers missing; outcome unconfirmed"
+        diagnostic = result.stderr or ""
+        # CLI error channel only; never infer a limit from arbitrary response bodies.
+        if status is None and result.returncode:
+            match = re.search(r"(?:\(HTTP |^gh: HTTP |^HTTP/[0-9.]+ )(403|429)\b", diagnostic, re.I | re.M)
+            status = int(match[1]) if match else None
+        rate = status == 429 or bool(re.search(r"rate[ -]+limit|abuse detection|retry-after", diagnostic, re.I))
+        rate = rate or (status == 403 and self.response_headers.get("x-ratelimit-remaining") == "0")
+        exhausted = self.response_headers.get("x-ratelimit-remaining") == "0"
+        if rate or exhausted:
+            seconds = 60.0
+            try:
+                retry = self.response_headers.get("retry-after")
+                if retry is not None:
+                    seconds = (
+                        float(retry)
+                        if retry.isdigit()
+                        else parsedate_to_datetime(retry).timestamp() - self.coordinator.clock()
+                    )
+                if self.response_headers.get("x-ratelimit-remaining") == "0":
+                    seconds = max(seconds, float(self.response_headers["x-ratelimit-reset"]) - self.coordinator.clock())
+                if not 0 <= seconds < float("inf"):
+                    raise ValueError
+            except (ValueError, TypeError, KeyError, OverflowError):
+                self.coordinator.rate_hold(policy=True)
+                return "", "GitHub rate metadata invalid; operator HOLD"
+            self.coordinator.rate_hold(seconds=seconds)
+            if rate:
+                return "", "GitHub rate HOLD; no automatic retry or account fallback"
+        if status == 403:
+            self.coordinator.rate_hold(policy=True)
+            return "", "GitHub policy HOLD; no automatic retry or account fallback"
+        if result.returncode or (status is not None and status >= 400):
+            return "", "GitHub request failed" if generic_errors else "GitHub request failed; outcome unconfirmed"
+        return stdout, None
 
     def get_for_token(self, token: str, endpoint: str) -> tuple[Any, Optional[str]]:
         """Read GitHub.com with exactly this token; never use ambient auth fallback."""
@@ -114,18 +200,38 @@ class GhCliTransport:
         return self._invoke(["-H", f"Accept: {accept}", endpoint])
 
     def get_paginated(self, endpoint: str) -> tuple[list, Optional[str]]:
-        text, error = self._invoke(["--paginate", "-H", "Accept: application/vnd.github+json", endpoint])
-        if error:
-            return [], error
-        return parse_concatenated_json(text)
+        items, seen = [], set()
+        while endpoint:
+            if endpoint in seen or len(seen) >= 1000:
+                return [], "pagination cycle or page limit; no partial result"
+            seen.add(endpoint)
+            text, error = self._invoke(["-H", "Accept: application/vnd.github+json", endpoint])
+            if error:
+                return [], error
+            page, error = parse_concatenated_json(text)
+            if error:
+                return [], error
+            items.extend(page)
+            links = re.findall(r'<([^>]+)>; rel="next"', self.response_headers.get("link", ""))
+            if len(links) > 1:
+                return [], "pagination links ambiguous"
+            endpoint = links[0] if links else ""
+            if endpoint:
+                parsed = urlsplit(endpoint)
+                if parsed.scheme != "https" or parsed.netloc != "api.github.com" or parsed.fragment:
+                    return [], "pagination target refused"
+        return items, None
 
     def request(self, method: str, endpoint: str, body: Optional[dict] = None) -> tuple[Any, Optional[str]]:
+        return self.request_with_intent(method, endpoint, body)
+
+    def request_with_intent(self, method, endpoint, body=None, before_effect=None):
         args = ["--method", method.upper(), "-H", "Accept: application/vnd.github+json", endpoint]
         stdin = None
         if body is not None:
             args += ["--input", "-"]
             stdin = json.dumps(body)
-        text, error = self._invoke(args, stdin=stdin)
+        text, error = self._invoke(args, stdin=stdin, before_effect=before_effect)
         return (None, error) if error else self._json(text)
 
 

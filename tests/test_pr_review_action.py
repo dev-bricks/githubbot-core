@@ -51,7 +51,7 @@ def action(**overrides):
 class Transport:
     def __init__(self):
         self.login = "example-bot"
-        self.pull = {"state": "open", "head": {"sha": SHA}, "draft": False, "user": {"login": "author"}}
+        self.pull = {"number": 7, "state": "open", "head": {"sha": SHA}, "draft": False, "user": {"login": "author"}}
         self.pull_answers = []
         self.reviews = []
         self.list_error = None
@@ -277,7 +277,7 @@ def test_timeout_after_creation_is_discovered_on_retry_even_without_receipt_stor
     transport.write_error = "Timeout"
     assert apply(transport)["status"] == "failed"
     transport.write_error = None
-    assert apply(transport)["status"] == "failed"
+    assert apply(transport)["status"] == "skipped_confirmed"
     assert len(transport.writes) == 1
 
 

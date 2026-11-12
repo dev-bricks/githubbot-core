@@ -308,3 +308,13 @@ Die alten benannten Flags `triage`, `review-merge`, `aftercare` bleiben mit ihre
 `githubbot-core --json multi-bot-select --input SNAPSHOT.json --mode operator` wählt deterministisch und ausschließlich lesend aus vorhandenen Kandidaten. Keine Queue, Auftragsanlage, Persistierung oder Agentenstarts. Der Snapshot enthält `candidates`, optional `processed` und `lastMaintenance`: Kandidaten brauchen `id`, exakte 40-stellige lowercase Commit-`revision`, `status` (`ready`, `blocked`, `done`), `category` (`prs`, `fixes`, `policies`, `care`) und optional `urgent` (bool). Ein `processed`-Eintrag bindet dieselben Felder an `blocked`/`done` und eine nichtleere `evidence`-Referenz; die tatsächliche Belegprüfung liegt beim Aufrufer. `lastMaintenance` ist ein `{id, revision}`-Verweis auf einen solchen erfolgreichen Policies-/Care-Abschluss. Auswahl und zwei leere Prüfungen verändern nichts. Unbekannte Werte werden abgewiesen. Neue PR-Heads kommen wieder vor Fixes/Pflege; erledigte oder blockierte gleiche Heads bleiben übersprungen, bis der zuständige Workflow neue Belege liefert. Gleichrangige Kandidaten werden nach ID und SHA sortiert.
 
 Der öffentliche ASCII-Windows-Starter trägt den Titel MULTI-BOT COMPANION, zeigt den Vordergrundbetrieb und wartet nach Erfolg, Fehler oder STOP auf eine Taste. Ausnahmen: explizites `--dry-run`, `TASKPLAN_STARTER_DRY_RUN=1` oder `MULTIBOT_NO_PAUSE=1`. Er installiert nichts und öffnet kein zusätzliches Fenster.
+
+## Hostlokale Request-Koordination
+
+Angewendete Aktionen verwenden jetzt dauerhafte lokale Inflight-/Unknown-Journale
+und OS-Sperren, auch ohne optionale Receipt-Datei. Bekannte Rate-Limits führen zu
+persistentem HOLD; Schreibaktionen werden niemals automatisch wiederholt. Exakte
+Review-/Merge-Leseprüfungen können unbekannte Ergebnisse bestätigen; andere bleiben
+gesperrt. Die Garantie gilt für kooperierende Prozesse mit gemeinsamem lokalem
+Zustand, nicht für mehrere Hosts. Einzelheiten und Wiederaufnahmegrenzen stehen
+im [Koordinationsvertrag](docs/TRANSPORT_COORDINATION.md).

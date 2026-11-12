@@ -232,7 +232,7 @@ def test_merge_api_2026_does_not_query_when_rest_has_not_confirmed_the_merge():
     assert len(transport.writes) == 1
 
 
-def test_ready_uses_graphql_for_the_exact_draft_head():
+def test_ready_uses_graphql_for_the_exact_draft_head(tmp_path):
     gets = base_gets()
     gets[f"repos/{REPO}/pulls/7"] = [pull(draft=True), pull(draft=False)]
     transport = Transport(gets, write_result={"data": {"markPullRequestReadyForReview": {}}})
@@ -243,6 +243,8 @@ def test_ready_uses_graphql_for_the_exact_draft_head():
     assert (method, endpoint, body["variables"]) == ("POST", "graphql", {"id": "PR_node"})
     gets[f"repos/{REPO}/pulls/7"] = pull(draft=True, base={"ref": "feature"})
     transport = Transport(gets)
+    from githubbot_core.coordination import Coordinator
+    transport.coordinator = Coordinator(tmp_path / "independent-invalid-base")
     assert actions.apply([action], transport, config())["receipts"][0]["status"] == "failed"
     assert transport.writes == []
 
