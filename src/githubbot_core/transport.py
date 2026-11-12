@@ -18,6 +18,9 @@ import subprocess
 import re
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Mapping
 
 from .coordination import Coordinator, Hold
 from typing import Any, Callable, Optional, Protocol
@@ -37,6 +40,13 @@ class Transport(Protocol):
     def request(self, method: str, endpoint: str, body: Optional[dict] = None) -> tuple[Any, Optional[str]]: ...
 
 
+@dataclass(frozen=True)
+class _Response:
+    body: str
+    error: Optional[str]
+    headers: Mapping[str, str]
+
+
 class GhCliTransport:
     """``gh api`` based transport. Authentication stays with the GitHub CLI."""
 
@@ -45,7 +55,6 @@ class GhCliTransport:
         self.timeout = timeout
         self._runner = runner
         self.coordinator = coordinator or Coordinator()
-        self.response_headers = {}
 
     def _invoke(
         self,
@@ -56,6 +65,12 @@ class GhCliTransport:
         generic_errors: bool = False,
         before_effect=None,
     ) -> tuple[str, Optional[str]]:
+        response = self._invoke_response(
+            args, stdin, env=env, generic_errors=generic_errors, before_effect=before_effect
+        )
+        return response.body, response.error
+
+    def _invoke_response(self, args, stdin=None, *, env=None, generic_errors=False, before_effect=None):
         # One persistent host-wide guard, shared across accounts. No retry here.
         mutation = "--method" in args and args[args.index("--method") + 1].upper() != "GET"
         if mutation and "graphql" in args and stdin:
@@ -76,7 +91,7 @@ class GhCliTransport:
                     before_effect()
                 return self._invoke_once(args, stdin, env=env, generic_errors=generic_errors)
         except (Hold, OSError):
-            return "", "GitHub coordination HOLD; no request sent"
+            return _Response("", "GitHub coordination HOLD; no request sent", MappingProxyType({}))
 
     def _invoke_once(self, args, stdin=None, *, env=None, generic_errors=False):
         cmd = [
@@ -90,7 +105,11 @@ class GhCliTransport:
             *args,
         ]
         run = self._runner or subprocess.run
-        self.response_headers = {}
+        headers = {}
+
+        def response(body, error):
+            return _Response(body, error, MappingProxyType(dict(headers)))
+
         try:
             result = run(
                 cmd,
@@ -103,9 +122,9 @@ class GhCliTransport:
                 **({"env": env} if env is not None else {}),
             )
         except subprocess.TimeoutExpired:
-            return "", "GitHub request failed" if generic_errors else "Timeout; outcome unconfirmed"
+            return response("", "GitHub request failed" if generic_errors else "Timeout; outcome unconfirmed")
         except Exception:
-            return "", "GitHub request failed"
+            return response("", "GitHub request failed")
         stdout = result.stdout or ""
         status = None
         if stdout.startswith("HTTP/"):
@@ -113,50 +132,52 @@ class GhCliTransport:
             first, *lines = header.splitlines()
             match = re.fullmatch(r"HTTP/[0-9.]+ ([0-9]{3})(?: .*)?", first)
             if not separator or not match:
-                return "", "GitHub response headers unreadable; outcome unconfirmed"
+                return response("", "GitHub response headers unreadable; outcome unconfirmed")
             status = int(match[1])
             for line in lines:
                 key, colon, value = line.partition(":")
                 if colon and key.lower() in {"retry-after", "x-ratelimit-remaining", "x-ratelimit-reset", "link"}:
-                    if key.lower() in self.response_headers:
-                        return "", "GitHub response headers ambiguous; outcome unconfirmed"
-                    self.response_headers[key.lower()] = value.strip()
+                    if key.lower() in headers:
+                        return response("", "GitHub response headers ambiguous; outcome unconfirmed")
+                    headers[key.lower()] = value.strip()
         elif self._runner is None and "--method" in args:
-            return "", "GitHub response headers missing; outcome unconfirmed"
+            return response("", "GitHub response headers missing; outcome unconfirmed")
         diagnostic = result.stderr or ""
         # CLI error channel only; never infer a limit from arbitrary response bodies.
         if status is None and result.returncode:
             match = re.search(r"(?:\(HTTP |^gh: HTTP |^HTTP/[0-9.]+ )(403|429)\b", diagnostic, re.I | re.M)
             status = int(match[1]) if match else None
         rate = status == 429 or bool(re.search(r"rate[ -]+limit|abuse detection|retry-after", diagnostic, re.I))
-        rate = rate or (status == 403 and self.response_headers.get("x-ratelimit-remaining") == "0")
-        exhausted = self.response_headers.get("x-ratelimit-remaining") == "0"
+        rate = rate or (status == 403 and headers.get("x-ratelimit-remaining") == "0")
+        exhausted = headers.get("x-ratelimit-remaining") == "0"
         if rate or exhausted:
             seconds = 60.0
             try:
-                retry = self.response_headers.get("retry-after")
+                retry = headers.get("retry-after")
                 if retry is not None:
                     seconds = (
                         float(retry)
                         if retry.isdigit()
                         else parsedate_to_datetime(retry).timestamp() - self.coordinator.clock()
                     )
-                if self.response_headers.get("x-ratelimit-remaining") == "0":
-                    seconds = max(seconds, float(self.response_headers["x-ratelimit-reset"]) - self.coordinator.clock())
+                if headers.get("x-ratelimit-remaining") == "0":
+                    seconds = max(seconds, float(headers["x-ratelimit-reset"]) - self.coordinator.clock())
                 if not 0 <= seconds < float("inf"):
                     raise ValueError
             except (ValueError, TypeError, KeyError, OverflowError):
                 self.coordinator.rate_hold(policy=True)
-                return "", "GitHub rate metadata invalid; operator HOLD"
+                return response("", "GitHub rate metadata invalid; operator HOLD")
             self.coordinator.rate_hold(seconds=seconds)
             if rate:
-                return "", "GitHub rate HOLD; no automatic retry or account fallback"
+                return response("", "GitHub rate HOLD; no automatic retry or account fallback")
         if status == 403:
             self.coordinator.rate_hold(policy=True)
-            return "", "GitHub policy HOLD; no automatic retry or account fallback"
+            return response("", "GitHub policy HOLD; no automatic retry or account fallback")
         if result.returncode or (status is not None and status >= 400):
-            return "", "GitHub request failed" if generic_errors else "GitHub request failed; outcome unconfirmed"
-        return stdout, None
+            return response(
+                "", "GitHub request failed" if generic_errors else "GitHub request failed; outcome unconfirmed"
+            )
+        return response(stdout, None)
 
     def get_for_token(self, token: str, endpoint: str) -> tuple[Any, Optional[str]]:
         """Read GitHub.com with exactly this token; never use ambient auth fallback."""
@@ -205,14 +226,15 @@ class GhCliTransport:
             if endpoint in seen or len(seen) >= 1000:
                 return [], "pagination cycle or page limit; no partial result"
             seen.add(endpoint)
-            text, error = self._invoke(["-H", "Accept: application/vnd.github+json", endpoint])
+            response = self._invoke_response(["-H", "Accept: application/vnd.github+json", endpoint])
+            text, error = response.body, response.error
             if error:
                 return [], error
             page, error = parse_concatenated_json(text)
             if error:
                 return [], error
             items.extend(page)
-            links = re.findall(r'<([^>]+)>; rel="next"', self.response_headers.get("link", ""))
+            links = re.findall(r'<([^>]+)>; rel="next"', response.headers.get("link", ""))
             if len(links) > 1:
                 return [], "pagination links ambiguous"
             endpoint = links[0] if links else ""

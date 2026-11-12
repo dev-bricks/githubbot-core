@@ -27,7 +27,9 @@ a one-second interval is required; a caller arriving too early receives HOLD
 rather than a sleeping/retrying mutation. Reads can continue during ordinary
 mutation spacing, but all requests stop during a rate cooldown or policy HOLD.
 `gh api --include` provides response headers; pagination is performed page by
-page, with validated GitHub API links and no partial result on failure.
+page, with validated GitHub API links and no partial result on failure. Body,
+error and an immutable header snapshot belong to one response; a concurrent
+read on the same transport cannot replace another response's pagination link.
 
 HTTP 429, remaining=0 on 403, or recognized CLI rate/secondary/abuse errors record
 a persistent cooldown. Retry-After (seconds or HTTP date) and reset epoch are

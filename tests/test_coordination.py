@@ -101,10 +101,15 @@ from githubbot_core.transport import GhCliTransport
 from types import SimpleNamespace
 root, mode = Path(sys.argv[1]),sys.argv[2]
 c=Coordinator(root)
-if mode=='request':
+if mode in {'request','barrier'}:
  def runner(*args,**kw):
   with (root/'trace').open('a') as f:f.write(json.dumps(['start',time.time()])+'\n')
-  time.sleep(.2)
+  if mode=='barrier':
+   deadline=time.monotonic()+20
+   while not (root/'release').exists():
+    assert time.monotonic()<deadline
+    time.sleep(.01)
+  else:time.sleep(.2)
   with (root/'trace').open('a') as f:f.write(json.dumps(['end',time.time()])+'\n')
   return SimpleNamespace(returncode=0,stdout='HTTP/2.0 200 OK\n\n{}',stderr='')
  assert GhCliTransport(runner=runner,coordinator=c).get('user')[1] is None
@@ -348,3 +353,206 @@ def test_unknown_merge_reconciles_only_exact_published_state(change, expected):
         target["merge_commit_sha"] = "invalid"
     assert apply([a], t, config())["receipts"][0]["status"] == expected
     assert len(t.writes) == 1
+
+
+def _interleave_identity_read(monkeypatch, transport, operation):
+    """Pause after page body extraction, outside the transport lock."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from githubbot_core import transport as transport_module
+
+    original = transport_module.parse_concatenated_json
+    page_ready, other_finished = threading.Event(), threading.Event()
+    paused = []
+
+    def parse(text):
+        if not paused:
+            paused.append(True)
+            page_ready.set()
+            assert other_finished.wait(5), "parallel identity read did not finish"
+        return original(text)
+
+    monkeypatch.setattr(transport_module, "parse_concatenated_json", parse)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(operation)
+        try:
+            assert page_ready.wait(5), "paging did not reach the deterministic boundary"
+            assert transport.get("user") == ({"login": "example-bot"}, None)
+        finally:
+            other_finished.set()
+        return future.result(timeout=10)
+
+
+def test_paginated_headers_are_bound_to_the_response_during_parallel_read(tmp_path, monkeypatch):
+    calls = []
+
+    def run(command, **kw):
+        endpoint = command[-1]
+        calls.append(endpoint)
+        if endpoint == "user":
+            return reply(body='{"login":"example-bot"}')
+        if "page=2" in endpoint:
+            return reply(body='[{"number":2}]')
+        return reply(
+            headers='Link: <https://api.github.com/repos/example-org/repo/issues?page=2>; rel="next"\r\n',
+            body='[{"number":1}]',
+        )
+
+    t = GhCliTransport(runner=run, coordinator=Coordinator(tmp_path / "thread-pages"))
+    result = _interleave_identity_read(monkeypatch, t, lambda: t.get_paginated("repos/example-org/repo/issues"))
+    assert result == ([{"number": 1}, {"number": 2}], None)
+    assert len(calls) == 3
+    assert not hasattr(t, "response_headers")
+
+
+def test_parallel_read_cannot_hide_existing_review_on_second_page(tmp_path, monkeypatch):
+    from test_pr_review_action import action, config, SHA, REPO
+    from githubbot_core.actions import apply
+
+    a = action()
+    calls = []
+
+    def run(command, **kw):
+        endpoint = command[-1]
+        calls.append(command)
+        if "--method" in command:
+            pytest.fail("existing second-page review must prohibit a duplicate POST")
+        if endpoint == "user":
+            return reply(body='{"login":"example-bot"}')
+        if endpoint == f"repos/{REPO}":
+            return reply(body=json.dumps({"full_name": REPO, "default_branch": "main"}))
+        if "reviews?page=2" in endpoint:
+            return reply(
+                body=json.dumps(
+                    [
+                        {
+                            "id": 81,
+                            "user": {"login": "example-bot"},
+                            "commit_id": SHA,
+                            "body": a.params["body"],
+                            "state": "APPROVED",
+                        }
+                    ]
+                )
+            )
+        if "/reviews?" in endpoint:
+            return reply(
+                headers=f'Link: <https://api.github.com/repos/{REPO}/pulls/7/reviews?page=2>; rel="next"\r\n', body="[]"
+            )
+        return reply(
+            body=json.dumps(
+                {
+                    "number": 7,
+                    "head": {"sha": SHA},
+                    "state": "open",
+                    "draft": False,
+                    "user": {"login": "another-author"},
+                }
+            )
+        )
+
+    t = GhCliTransport(runner=run, coordinator=Coordinator(tmp_path / "thread-review"))
+    result = _interleave_identity_read(monkeypatch, t, lambda: apply([a], t, config()))
+    assert result["receipts"][0]["status"] == "failed"
+    assert "already exists" in result["receipts"][0]["detail"]
+    assert result["writes"] == 0
+    assert not any("--method" in c for c in calls)
+
+
+def test_response_header_snapshot_is_immutable(tmp_path):
+    t = GhCliTransport(
+        runner=lambda *a, **kw: reply(headers="X-RateLimit-Remaining: 10\r\n"),
+        coordinator=Coordinator(tmp_path / "immutable"),
+    )
+    response = t._invoke_response(["user"])
+    with pytest.raises(TypeError):
+        response.headers["link"] = "replacement"
+    assert response.body == '{"ok": true}' and response.error is None
+
+
+def test_same_process_threads_cannot_overlap_via_canonical_lock_path(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    c = Coordinator(tmp_path / "same-thread", timeout=0.05)
+    alias = Coordinator(c.root / ".." / c.root.name, timeout=0.05)
+
+    def contender():
+        with alias.lock("same"):
+            return "incorrectly-acquired"
+
+    with c.lock("same"):
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(contender)
+            with pytest.raises(Hold, match="coordination busy; no request sent"):
+                future.result(timeout=5)
+    with alias.lock("same"):
+        pass
+
+
+def test_threads_and_external_process_cannot_enter_same_transport_lock(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    import time
+
+    root = tmp_path / "mixed"
+    child = spawn(root, "barrier")
+    try:
+        deadline = time.monotonic() + 10
+        while not (root / "trace").exists():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+
+        def contend():
+            with Coordinator(root, timeout=0.1).lock("github-com-transport"):
+                return "incorrectly-acquired"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(contend) for _ in range(2)]
+            for future in futures:
+                with pytest.raises(Hold, match="coordination busy; no request sent"):
+                    future.result(timeout=5)
+    finally:
+        (root / "release").write_text("release", encoding="utf-8")
+        finish(child)
+    with Coordinator(root).lock("github-com-transport"):
+        pass
+
+
+def test_concurrent_apply_threads_never_duplicate_unknown_or_successful_effect(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from githubbot_core.actions import Action, apply
+
+    entered, release = threading.Event(), threading.Event()
+    writes = []
+    root = tmp_path / "thread-actions"
+
+    class T:
+        def __init__(self):
+            self.coordinator = Coordinator(root, timeout=0.1)
+
+        def get(self, e):
+            return ({"login": "example-bot"} if e == "user" else {"full_name": "example-org/repo"}), None
+
+        def request(self, *args):
+            writes.append(args)
+            entered.set()
+            assert release.wait(5)
+            return {"ok": True}, None
+
+    cfg = {
+        "permissions": {"ceiling": ["issue.comment"], "enabled": ["issue.comment"], "write_owners": ["example-org"]},
+        "multi_bot": {"merge_account": "example-bot"},
+    }
+    a = Action("issue.comment", {"repo": "example-org/repo", "number": 1, "body": "synthetic"})
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(apply, [a], T(), cfg)
+        try:
+            assert entered.wait(5)
+            second = apply([a], T(), cfg)
+            assert second["receipts"][0]["status"] == "failed"
+            assert len(writes) == 1
+        finally:
+            release.set()
+        assert first.result(timeout=5)["receipts"][0]["status"] == "applied"
+    assert apply([a], T(), cfg)["receipts"][0]["status"] == "skipped_duplicate"
+    assert len(writes) == 1
