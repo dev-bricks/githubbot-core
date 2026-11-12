@@ -8,6 +8,7 @@ import math
 import os
 import time
 import tempfile
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -126,9 +127,8 @@ class Coordinator:
         with self.lock("github-com-rate-state"):
             return self._check_rate_locked(mutation)
 
-    def _check_rate_locked(self, mutation=False):
+    def _rate_state_locked(self):
         state = self.load("github-com-rate")
-        now = self.clock()
         if state and (
             state.get("schema") != "githubbot-core.rate/v1"
             or not set(state) <= {"schema", "observed", "not_before", "last_mutation", "policy_hold"}
@@ -138,6 +138,26 @@ class Coordinator:
             value = state.get(key, 0)
             if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
                 raise Hold("coordination rate state invalid")
+        return state
+
+    def _pending_request_locked(self):
+        marker = self.load("github-com-request")
+        if marker and (
+            set(marker) != {"schema", "id", "status"}
+            or marker.get("schema") != "githubbot-core.request/v1"
+            or marker.get("status") != "inflight"
+            or not isinstance(marker.get("id"), str)
+            or len(marker["id"]) != 32
+            or any(c not in "0123456789abcdef" for c in marker["id"])
+        ):
+            raise Hold("request uncertainty marker invalid; operator inspection required")
+        return marker
+
+    def _check_rate_locked(self, mutation=False):
+        if self._pending_request_locked():
+            raise Hold("request uncertainty HOLD; operator inspection required")
+        state = self._rate_state_locked()
+        now = self.clock()
         if now < state.get("observed", 0):
             raise Hold("coordination clock moved backwards")
         if state.get("policy_hold"):
@@ -158,7 +178,8 @@ class Coordinator:
             return self._rate_hold_locked(seconds=seconds, policy=policy)
 
     def _rate_hold_locked(self, *, seconds=None, policy=False):
-        state = self.load("github-com-rate")
+        state = self._rate_state_locked()
+        state["schema"] = "githubbot-core.rate/v1"
         now = self.clock()
         state["observed"] = max(now, state.get("observed", 0))
         if policy:
@@ -166,6 +187,53 @@ class Coordinator:
         else:
             state["not_before"] = max(state.get("not_before", 0), now + max(60, seconds or 0))
         self.save("github-com-rate", state)
+        if self._rate_state_locked() != state:
+            raise Hold("rate HOLD persistence unconfirmed")
+
+    def begin_request(self, mutation=False):
+        """Caller holds transport lock; durable marker must precede any request."""
+        with self.lock("github-com-rate-state"):
+            self._check_rate_locked(mutation)
+            request_id = uuid.uuid4().hex
+            marker = {"schema": "githubbot-core.request/v1", "id": request_id, "status": "inflight"}
+            self.save("github-com-request", marker)
+            if self._pending_request_locked() != marker:
+                raise Hold("request marker persistence unconfirmed; nothing sent")
+            return request_id
+
+    def _remove_request_locked(self, request_id):
+        marker = self._pending_request_locked()
+        if not marker or marker["id"] != request_id:
+            raise Hold("request marker changed; operator inspection required")
+        (self.root / "github-com-request.json").unlink()
+        if os.name != "nt":
+            directory = os.open(self.root, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+
+    def finish_request(self, request_id):
+        """Caller holds transport lock; only after complete safe response handling."""
+        with self.lock("github-com-rate-state"):
+            self._rate_state_locked()
+            self._remove_request_locked(request_id)
+
+    def settle_request_as_policy_hold(self, request_id):
+        """Explicit offline recovery: consume exact marker into durable policy HOLD.
+
+        This never authorizes another request, performs a network read or resets
+        a policy HOLD. Failed persistence leaves the original marker intact.
+        """
+        with self.lock("github-com-transport"):
+            with self.lock("github-com-rate-state"):
+                marker = self._pending_request_locked()
+                if not marker or marker["id"] != request_id:
+                    raise Hold("request marker changed; recovery denied")
+                self._rate_hold_locked(policy=True)
+                if self._rate_state_locked().get("policy_hold") is not True:
+                    raise Hold("policy HOLD persistence unconfirmed")
+                self._remove_request_locked(request_id)
 
     @staticmethod
     def action_key(action_id):

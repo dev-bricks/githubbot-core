@@ -101,9 +101,10 @@ from githubbot_core.transport import GhCliTransport
 from types import SimpleNamespace
 root, mode = Path(sys.argv[1]),sys.argv[2]
 c=Coordinator(root)
-if mode in {'request','barrier'}:
+if mode in {'request','barrier','request-crash'}:
  def runner(*args,**kw):
   with (root/'trace').open('a') as f:f.write(json.dumps(['start',time.time()])+'\n')
+  if mode=='request-crash':os._exit(24)
   if mode=='barrier':
    deadline=time.monotonic()+20
    while not (root/'release').exists():
@@ -566,7 +567,6 @@ def test_action_preflight_cannot_overwrite_concurrent_transport_hold(tmp_path, r
     from githubbot_core.actions import Action
 
     stale_snapshot, allow_save, policy_waiting = threading.Event(), threading.Event(), threading.Event()
-    policy_started, allow_policy_response = threading.Event(), threading.Event()
     root = tmp_path / "rate-transaction"
 
     class ActionCoordinator(Coordinator):
@@ -582,16 +582,10 @@ def test_action_preflight_cannot_overwrite_concurrent_transport_hold(tmp_path, r
     class PolicyCoordinator(Coordinator):
         @contextmanager
         def lock(self, name):
-            if name == "github-com-rate-state" and self.hold_phase:
+            if name == "github-com-rate-state":
                 policy_waiting.set()
             with super().lock(name):
                 yield
-
-        hold_phase = False
-
-        def rate_hold(self, **kw):
-            self.hold_phase = True
-            return super().rate_hold(**kw)
 
     action_coordinator = ActionCoordinator(root)
     policy_coordinator = PolicyCoordinator(root)
@@ -601,8 +595,6 @@ def test_action_preflight_cannot_overwrite_concurrent_transport_hold(tmp_path, r
         commands.append(command)
         endpoint = command[-1]
         if endpoint == "synthetic-policy":
-            policy_started.set()
-            assert allow_policy_response.wait(5)
             return reply(403) if rate_response == "policy" else reply(429, "Retry-After: 120\r\n")
         if "--method" in command:
             pytest.fail("concurrent HOLD must prohibit the POST")
@@ -630,15 +622,12 @@ def test_action_preflight_cannot_overwrite_concurrent_transport_hold(tmp_path, r
             return t.request_with_intent(*args, **kw)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        policy = pool.submit(GhCliTransport(runner=run, coordinator=policy_coordinator).get, "synthetic-policy")
-        assert policy_started.wait(5)
         action = pool.submit(_coordinated_action, a, ActionTransport(), cfg, plan_digest([a], cfg))
         try:
             assert stale_snapshot.wait(5)
-            allow_policy_response.set()
-            assert policy_waiting.wait(5), "rate_hold must acquire the same state lock"
+            policy = pool.submit(GhCliTransport(runner=run, coordinator=policy_coordinator).get, "synthetic-policy")
+            assert policy_waiting.wait(5), "request/HOLD transactions must acquire the same state lock"
         finally:
-            allow_policy_response.set()
             allow_save.set()
         assert policy.result(timeout=10)[1]
         result = action.result(timeout=10)
@@ -667,3 +656,174 @@ def test_rate_state_lock_failure_after_request_does_not_claim_nothing_sent(tmp_p
     data, error = t.request("POST", "repos/example-org/repo/issues/1/comments", {"body": "synthetic"})
     assert data is None and len(calls) == 1
     assert "outcome unconfirmed" in error and "no request sent" not in error
+
+
+FRESH_REQUEST_CHECK = r"""
+import sys,json
+from pathlib import Path
+from githubbot_core.coordination import Coordinator
+from githubbot_core.transport import GhCliTransport
+root=Path(sys.argv[1])
+calls=[]
+def runner(*a,**kw):
+ calls.append(1)
+ raise AssertionError('ordinary request must remain blocked')
+result=GhCliTransport(runner=runner,coordinator=Coordinator(root,timeout=.2)).get('user')
+assert result[1] and not calls
+print(json.dumps({'requests':len(calls),'error':result[1]}))
+"""
+
+
+def fresh_request_is_blocked(root):
+    child = subprocess.Popen(
+        [sys.executable, "-B", "-X", "utf8", "-c", FRESH_REQUEST_CHECK, str(root)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
+    )
+    return json.loads(finish(child))
+
+
+def test_real_state_lock_failure_after_403_blocks_fresh_process(tmp_path):
+    import time
+
+    root = tmp_path / "persist-failed"
+    contender = []
+    script = r"""
+import sys,time
+from pathlib import Path
+from githubbot_core.coordination import Coordinator
+root=Path(sys.argv[1])
+with Coordinator(root).lock('github-com-rate-state'):
+ (root/'lock-ready').write_text('ready')
+ deadline=time.monotonic()+20
+ while not (root/'unlock').exists():
+  assert time.monotonic()<deadline
+  time.sleep(.01)
+"""
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        child = subprocess.Popen(
+            [sys.executable, "-B", "-X", "utf8", "-c", script, str(root)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
+        )
+        contender.append(child)
+        deadline = time.monotonic() + 10
+        while not (root / "lock-ready").exists():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        return reply(403)
+
+    try:
+        data, error = GhCliTransport(runner=run, coordinator=Coordinator(root, timeout=0.05)).get("user")
+        assert data is None and "outcome unconfirmed" in error and len(calls) == 1
+        assert (root / "github-com-request.json").exists()
+    finally:
+        (root / "unlock").write_text("unlock")
+        for child in contender:
+            finish(child)
+    assert fresh_request_is_blocked(root)["requests"] == 0
+    assert (root / "github-com-request.json").exists()
+
+
+def test_timeout_and_restart_keep_request_marker_without_retry(tmp_path):
+    root = tmp_path / "timeout-marker"
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        raise subprocess.TimeoutExpired("synthetic-gh", 1)
+
+    result = GhCliTransport(runner=run, coordinator=Coordinator(root)).get("user")
+    assert result[1] and len(calls) == 1
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+def test_marker_must_be_durable_before_request(tmp_path):
+    class NoMarker(Coordinator):
+        def save(self, name, value):
+            if name == "github-com-request":
+                raise PermissionError("synthetic disk failure")
+            return super().save(name, value)
+
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply()
+
+    result = GhCliTransport(runner=run, coordinator=NoMarker(tmp_path / "cannot-mark")).get("user")
+    assert result[1] == "GitHub coordination HOLD; no request sent" and not calls
+
+
+def test_explicit_recovery_only_promotes_exact_marker_to_policy_hold(tmp_path):
+    c = Coordinator(tmp_path / "recovery")
+    with c.lock("github-com-transport"):
+        request_id = c.begin_request()
+    with pytest.raises(Hold):
+        c.settle_request_as_policy_hold("0" * 32)
+    assert c.load("github-com-request")["id"] == request_id
+    c.settle_request_as_policy_hold(request_id)
+    assert not (c.root / "github-com-request.json").exists()
+    assert c.load("github-com-rate")["policy_hold"] is True
+    assert fresh_request_is_blocked(c.root)["requests"] == 0
+
+
+def test_failed_recovery_preserves_marker_when_policy_cannot_be_saved(tmp_path):
+    root = tmp_path / "recovery-denied"
+    c = Coordinator(root)
+    with c.lock("github-com-transport"):
+        request_id = c.begin_request()
+
+    class NoState(Coordinator):
+        def save(self, name, value):
+            if name == "github-com-rate":
+                raise PermissionError("synthetic disk failure")
+            return super().save(name, value)
+
+    with pytest.raises(OSError):
+        NoState(root).settle_request_as_policy_hold(request_id)
+    assert c.load("github-com-request")["id"] == request_id
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+def test_transport_process_death_leaves_uncertainty_for_next_process(tmp_path):
+    root = tmp_path / "dead-transport"
+    finish(spawn(root, "request-crash"), 24)
+    assert (root / "github-com-request.json").exists()
+    assert [json.loads(x)[0] for x in (root / "trace").read_text().splitlines()] == ["start"]
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+def test_successful_response_with_failed_marker_cleanup_remains_blocked(tmp_path):
+    class CannotFinish(Coordinator):
+        def finish_request(self, request_id):
+            raise PermissionError("synthetic cleanup failure")
+
+    root = tmp_path / "cleanup"
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply()
+
+    data, error = GhCliTransport(runner=run, coordinator=CannotFinish(root)).get("user")
+    assert data is None and "outcome unconfirmed" in error and len(calls) == 1
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+def test_offline_recovery_of_marker_with_missing_rate_state_still_denies_network(tmp_path):
+    c = Coordinator(tmp_path / "missing-rate")
+    with c.lock("github-com-transport"):
+        request_id = c.begin_request()
+    (c.root / "github-com-rate.json").unlink()
+    c.settle_request_as_policy_hold(request_id)
+    state = c.load("github-com-rate")
+    assert state["schema"] == "githubbot-core.rate/v1" and state["policy_hold"] is True
+    assert fresh_request_is_blocked(c.root)["requests"] == 0

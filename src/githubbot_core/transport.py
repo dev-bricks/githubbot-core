@@ -45,6 +45,7 @@ class _Response:
     body: str
     error: Optional[str]
     headers: Mapping[str, str]
+    state_confirmed: bool = False
 
 
 class GhCliTransport:
@@ -87,11 +88,14 @@ class GhCliTransport:
                 pass
         try:
             with self.coordinator.lock("github-com-transport"):
-                self.coordinator.check_rate(mutation)
+                request_id = self.coordinator.begin_request(mutation)
                 if mutation and before_effect is not None:
                     before_effect()
                 request_attempted = True
-                return self._invoke_once(args, stdin, env=env, generic_errors=generic_errors)
+                response = self._invoke_once(args, stdin, env=env, generic_errors=generic_errors)
+                if response.state_confirmed:
+                    self.coordinator.finish_request(request_id)
+                return response
         except (Hold, OSError):
             message = (
                 "GitHub coordination HOLD after request attempt; outcome unconfirmed"
@@ -114,8 +118,8 @@ class GhCliTransport:
         run = self._runner or subprocess.run
         headers = {}
 
-        def response(body, error):
-            return _Response(body, error, MappingProxyType(dict(headers)))
+        def response(body, error, state_confirmed=False):
+            return _Response(body, error, MappingProxyType(dict(headers)), state_confirmed)
 
         try:
             result = run(
@@ -173,18 +177,20 @@ class GhCliTransport:
                     raise ValueError
             except (ValueError, TypeError, KeyError, OverflowError):
                 self.coordinator.rate_hold(policy=True)
-                return response("", "GitHub rate metadata invalid; operator HOLD")
+                return response("", "GitHub rate metadata invalid; operator HOLD", True)
             self.coordinator.rate_hold(seconds=seconds)
             if rate:
-                return response("", "GitHub rate HOLD; no automatic retry or account fallback")
+                return response("", "GitHub rate HOLD; no automatic retry or account fallback", True)
         if status == 403:
             self.coordinator.rate_hold(policy=True)
-            return response("", "GitHub policy HOLD; no automatic retry or account fallback")
+            return response("", "GitHub policy HOLD; no automatic retry or account fallback", True)
         if result.returncode or (status is not None and status >= 400):
             return response(
-                "", "GitHub request failed" if generic_errors else "GitHub request failed; outcome unconfirmed"
+                "",
+                "GitHub request failed" if generic_errors else "GitHub request failed; outcome unconfirmed",
+                status is not None,
             )
-        return response(stdout, None)
+        return response(stdout, None, True)
 
     def get_for_token(self, token: str, endpoint: str) -> tuple[Any, Optional[str]]:
         """Read GitHub.com with exactly this token; never use ambient auth fallback."""

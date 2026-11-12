@@ -46,6 +46,34 @@ not trigger account fallback. There is no automatic account switch in Core.
 An expired cooldown permits a new explicitly requested operation; it does not
 replay a previous write. No automatic policy-HOLD reset is provided in this unit.
 
+## Durable request uncertainty
+
+Before **every supported request**, including GET and typed Git push/readback,
+Core persists and reads back one shared request-inflight marker while holding
+transport -> rate-state locks. If the marker cannot be durably written, nothing
+is sent. The marker contains a random request ID and fixed schema/status only,
+never a token, URL or body. It has no automatic expiry.
+
+Only completed transport status/header handling and confirmed rate-state
+persistence permit marker removal. A timeout, process death, malformed transport
+response, failed HOLD persistence or failed marker cleanup leaves uncertainty
+HOLD across process restarts. A fresh process must not send even a GET merely
+because the original OS lock has become available. Ordinary action preflight and
+Git use the same marker check. This takes precedence over automatic action
+readback; application-level readback remains possible only when transport state
+is confirmed. Parsed application/body errors still use the action journal.
+
+Recovery is explicit and offline: after operator inspection, trusted embedding
+may call `Coordinator.settle_request_as_policy_hold(exact_request_id)`. Under
+transport -> rate-state locks this persists and verifies policy HOLD before
+consuming that exact marker. It performs no network request and does **not**
+permit further requests. A wrong ID, failed write or unreadable state preserves
+HOLD; no automatic deletion, TTL reset or fallback account is used. Releasing a
+policy HOLD requires a separate reviewed operator decision; this unit provides
+no automatic unblock API. If storage remains unwritable, requests remain blocked,
+and the storage/authority problem must be repaired before recovery can complete.
+This is a durability prerequisite, not a claim that recovery is impossible.
+
 ## Durable unknown-write journal
 
 `actions.apply` preserves permission, actor, canonical target, head, review and
@@ -89,7 +117,7 @@ semantic gates remain tested; their sandbox state is isolated per test.
 Die Umsetzung koordiniert kooperierende Prozesse desselben OS-Benutzers auf
 einem Host mit gemeinsamem lokalem Zustand. Sie bietet keine Mehrhostgarantie.
 Dateisperren werden niemals zur Wiederherstellung gelöscht. Bei unbestätigtem
-Schreibausgang gilt dauerhaft HOLD; ein Neustart ist keine Freigabe. Nur die
+Schreibausgang oder fehlgeschlagener HOLD-Speicherung gilt dauerhaft HOLD; ein Neustart ist keine Freigabe. Nur die
 beschriebenen eindeutigen Review-/Merge-Leseprüfungen können den Zustand als
 bestätigt kennzeichnen. Für andere Aktionen bleibt eine gesonderte geprüfte
 Wiederaufnahme erforderlich. Rate-HOLD erlaubt keinen Kontowechsel zur Umgehung.
