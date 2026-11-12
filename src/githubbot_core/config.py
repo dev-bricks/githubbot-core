@@ -14,6 +14,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+from .write_scope import normalize_owners
+
 # Dotted keys whose value is a list that later layers may only narrow.
 NARROW_ONLY = ("permissions.ceiling", "permissions.api_write_prefixes")
 
@@ -57,9 +59,26 @@ def merge_layers(layers: Iterable[tuple[str, dict]]) -> dict:
     """Merge ``(name, data)`` layers in order. The first layer is the base."""
     merged: dict = {}
     narrowed: dict[str, Optional[list]] = {key: None for key in NARROW_ONLY}
+    bound_owners = None
     for name, layer in layers:
         if not isinstance(layer, dict):
             raise ConfigError(f"{name}: configuration must be a JSON object")
+        if "permissions" in layer and not isinstance(layer["permissions"], dict):
+            raise ConfigError(f"{name}: permissions must be an object")
+        permissions = layer.get("permissions", {})
+        if "write_owners" in permissions:
+            raw = permissions["write_owners"]
+            if raw is None:
+                if bound_owners is not None:
+                    raise ConfigError(f"{name}: permissions.write_owners may not be reset after binding")
+            else:
+                try:
+                    owners = normalize_owners(raw)
+                except ValueError as exc:
+                    raise ConfigError(f"{name}: {exc}") from exc
+                if bound_owners is not None and not set(owners) <= set(bound_owners):
+                    raise ConfigError(f"{name}: permissions.write_owners may only be narrowed")
+                bound_owners = owners
         for key in NARROW_ONLY:
             value = _get(layer, key)
             if value is None:
@@ -76,11 +95,19 @@ def merge_layers(layers: Iterable[tuple[str, dict]]) -> dict:
     for key, value in narrowed.items():
         if value is not None:
             _set(merged, key, value)
+    if bound_owners is not None:
+        _set(merged, "permissions.write_owners", bound_owners)
     validate(merged)
     return merged
 
 
 def validate(config: dict) -> None:
+    owners = _get(config, "permissions.write_owners")
+    if owners is not None:
+        try:
+            normalize_owners(owners)
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
     ceiling = _get(config, "permissions.ceiling") or []
     enabled = _get(config, "permissions.enabled") or []
     outside = [kind for kind in enabled if kind not in ceiling]

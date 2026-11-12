@@ -1,5 +1,50 @@
 # githubbot-core
 
+## Explicit write authority
+
+**Intentional compatibility change:** packaged defaults no longer authorize any
+remote write, including issue labels/comments. Reads and previews remain usable;
+unbound actions appear as denied. A write profile must explicitly bind both its
+owner ceiling and the expected GitHub actor, in addition to all existing action
+permissions, switches, review/head checks and receipt requirements:
+
+```json
+{
+  "permissions": {"write_owners": ["example-org"]},
+  "multi_bot": {"merge_account": "example-bot"}
+}
+```
+
+`permissions.write_owners: null` (or absence) is unbound and denies writes; `[]`
+is a bound deny-all ceiling. The first explicit list binds the profile. Later
+configuration layers may only retain or narrow that list, never reset it or add
+owners, including after narrowing to `[]`. Owners are exact ASCII account names,
+normalized case-insensitively; wildcards, URLs, paths, encoded names and duplicates
+are invalid. Actor changes require explicit configuration and a new preview;
+they do not widen the owner scope. The Core never changes credentials or accounts.
+
+The same central checks protect preview and direct `actions.apply`, including
+calls from the installed CLI or a starter without a wrapper. Every executor
+effect first verifies the configured actor and canonical repository identity.
+The preview hash includes the normalized owner ceiling and actor. An old hash
+cannot authorize an apply under a changed scope or actor; action receipt IDs
+remain stable for deduplication. Inputs are snapshotted at the call boundary.
+
+Opaque GraphQL mutations and ambiguous/non-repository raw writes fail closed.
+Raw `api.request` supports only POST on explicitly scoped
+`repos/OWNER/REPO/issues/NUMBER/comments` or `.../labels`, plus PUT/DELETE on
+`user/starred/OWNER/REPO` with the same repository/actor verification. It still requires its
+existing enabled/ceiling/API-prefix grants. Critical PR, Git and Actions effects
+use their existing typed action contracts; generic raw endpoints cannot bypass
+those gates or publish releases, transfer repositories or force refs. Unknown
+executor target contracts are denied. This is a deliberate capability boundary,
+not a promise of backward compatibility for arbitrary plugin write transports.
+
+No instance owner list, account, credential, private profile or runtime install
+is shipped by this feature. Adapters must carry the explicit pinned profile into
+every preview/apply invocation. The module manifest describes source capabilities
+only; it grants no installation, start or publishing authority.
+
 <p align="center"><img src="assets/banner.png" width="100%" alt="githubbot-core banner"></p>
 
 **English** | [Deutsch](README_de.md)

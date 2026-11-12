@@ -26,7 +26,7 @@ def config(*, enabled=True, publish=True, account="example-bot"):
             (
                 "instance",
                 {
-                    "permissions": {"enabled": ["pr.review"] if enabled else []},
+                    "permissions": {"enabled": ["pr.review"] if enabled else [], "write_owners": ["example-org"]},
                     "multi_bot": {"merge_account": account, "policy": {"publish_reviews": publish}},
                 },
             ),
@@ -67,6 +67,8 @@ class Transport:
         self.reads.append(endpoint)
         if endpoint == "user":
             return {"login": self.login}, None
+        if endpoint == f"repos/{REPO}":
+            return {"full_name": REPO}, None
         if endpoint == ENDPOINT:
             return copy.deepcopy(self.pull_answers.pop(0) if self.pull_answers else self.pull), None
         if endpoint == f"{ENDPOINT}/reviews/81":
@@ -176,7 +178,7 @@ def test_review_requires_the_configured_account():
     transport = Transport()
     assert apply(transport, cfg=config(account=""))["status"] == "denied"
     transport.login = "someone-else"
-    assert apply(transport)["status"] == "failed"
+    assert apply(transport)["status"] == "denied"
     assert not transport.writes
 
 

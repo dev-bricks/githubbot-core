@@ -1,5 +1,43 @@
 # githubbot-core
 
+## Explizite Schreibautorität
+
+**Bewusste Vertragsänderung:** Der Paketdefault erlaubt keine entfernten
+Schreibwirkungen mehr, auch keine Issue-Labels oder Kommentare. Lesen und
+Vorschauen bleiben nutzbar; ungebundene Aktionen werden als gesperrt ausgewiesen.
+Zusätzlich zu bisherigen Permissions, Schaltern, Review-/Headprüfungen und
+Receipts braucht ein Schreibprofil ausdrücklich `permissions.write_owners`
+(beispielsweise `["example-org"]`) und `multi_bot.merge_account`
+(beispielsweise `"example-bot"`) als erwartetes GitHub-Konto.
+
+Fehlende Ownerbindung oder `null` bedeutet ungebunden und gesperrt; `[]` bindet
+ein endgültig leeres Ceiling. Die erste explizite Liste bindet das Profil.
+Spätere Schichten dürfen sie nur beibehalten oder verengen, niemals zurücksetzen
+oder erweitern. Gültig sind exakte ASCII-Ownernamen ohne Wildcards, URLs, Pfade,
+Codierung oder normalisierte Duplikate. Groß-/Kleinschreibung wird normalisiert.
+Ein ausdrücklich konfigurierter Kontowechsel erweitert den Ownerscope nicht und
+benötigt eine neue Vorschau. Der Core wechselt selbst keine Zugangsdaten.
+
+Die zentrale Prüfung gilt auch für direkte CLI-/Starter-/Python-Applyaufrufe ohne
+Wrapper. Vor jeder Executorwirkung werden erwartetes Konto und tatsächliche
+Repositoryidentität geprüft. Ownerceiling und Konto sind im Planhash gebunden;
+nach Änderungen ist eine alte Applyfreigabe ungültig. Eingaben werden beim
+Aufruf kopiert, bisherige Aktions-Receipt-IDs bleiben für Dubletten stabil.
+
+Opaque GraphQL-Mutationen, unbekannte Targetverträge und unklare Rawwrites sind
+gesperrt. Raw `api.request` unterstützt nur POST auf ausdrücklich gebundene
+`repos/OWNER/REPO/issues/NUMMER/comments` oder `.../labels` sowie PUT/DELETE auf
+`user/starred/OWNER/REPO` mit derselben Repo-/Kontoprüfung, weiterhin mit den
+bisherigen API-Präfix-/Permissionsgates. Kritische PR-/Git-/Actionswirkungen
+bleiben auf ihren bestehenden getypten Verträgen; Rawtransport umgeht keine
+Review-/Headgates, publiziert keine Releases und erzwingt keine Refänderungen.
+Dies ist keine pauschale Kompatibilitätszusage für beliebige Plugintransporte.
+
+Private Ownerlisten, Konten oder Profile und Runtimeinstallationen werden nicht
+mitgeliefert. Adapter müssen das explizite Profil in jeden Preview-/Applyaufruf
+übernehmen. Das Modulmanifest beschreibt nur Quellfähigkeiten, keine Start-,
+Installations- oder Veröffentlichungsfreigabe.
+
 <p align="center"><img src="assets/banner.png" width="100%" alt="githubbot-core Banner"></p>
 
 [English](README.md) | **Deutsch**

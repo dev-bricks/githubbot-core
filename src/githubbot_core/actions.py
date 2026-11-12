@@ -11,13 +11,14 @@ so a repeated run never repeats a write.
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from . import typed_actions
+from . import typed_actions, write_scope
 
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -38,9 +39,10 @@ class Action:
         return {"id": self.action_id, **asdict(self)}
 
 
-def plan_digest(actions: list[Action]) -> str:
+def plan_digest(actions: list[Action], config: Optional[dict] = None) -> str:
     joined = "\n".join(action.action_id for action in actions)
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+    payload = {"actions": joined, "write_authority": write_scope.binding(config or {})}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def denial_reason(action: Action, config: dict) -> Optional[str]:
@@ -65,15 +67,16 @@ def denial_reason(action: Action, config: dict) -> Optional[str]:
             return f"api.request method {method or '?'} is not a write method"
         if ".." in endpoint or not any(endpoint.startswith(p) for p in prefixes):
             return f"api.request endpoint {endpoint!r} is not covered by permissions.api_write_prefixes"
-    return None
+    return write_scope.denial(action.kind, action.params, config)
 
 
 def preview(actions: list[Action], config: dict) -> dict:
+    actions, config = copy.deepcopy(actions), copy.deepcopy(config)
     items = []
     for action in actions:
         reason = denial_reason(action, config)
         items.append({**action.to_dict(), "permitted": reason is None, "denied_reason": reason})
-    return {"mode": "preview", "plan_sha256": plan_digest(actions), "actions": items, "writes": 0}
+    return {"mode": "preview", "plan_sha256": plan_digest(actions, config), "actions": items, "writes": 0}
 
 
 def _exec_add_labels(transport, params: dict, config: dict):
@@ -122,7 +125,8 @@ def apply(
     expected_plan_sha256: Optional[str] = None,
 ) -> dict:
     """Execute permitted actions. Every action gets exactly one receipt."""
-    digest = plan_digest(actions)
+    actions, config = copy.deepcopy(actions), copy.deepcopy(config)
+    digest = plan_digest(actions, config)
     if expected_plan_sha256 and expected_plan_sha256 != digest:
         return {
             "mode": "apply",
@@ -147,11 +151,15 @@ def apply(
         elif action.action_id in applied_before:
             record.update(status="skipped_duplicate", detail="already applied according to the receipt store")
         else:
-            data, error = EXECUTORS[action.kind](transport, action.params, config)
-            writes += 1
-            record.update(status="failed" if error else "applied", detail=error or "")
-            if not error and isinstance(data, dict) and "readback" in data:
-                record["readback"] = data["readback"]
+            authority_error = write_scope.transport_denial(transport, action.kind, action.params, config)
+            if authority_error:
+                record.update(status="denied", detail=authority_error)
+            else:
+                data, error = EXECUTORS[action.kind](transport, action.params, config)
+                writes += 1
+                record.update(status="failed" if error else "applied", detail=error or "")
+                if not error and isinstance(data, dict) and "readback" in data:
+                    record["readback"] = data["readback"]
         receipts.append(record)
         if receipt_store is not None:
             receipt_store.parent.mkdir(parents=True, exist_ok=True)
