@@ -120,6 +120,13 @@ class Coordinator:
                 os.unlink(temporary)
 
     def check_rate(self, mutation=False):
+        # A complete read/validate/write transaction, including action preflight
+        # calls which do not already hold the transport lock. Never acquire the
+        # transport/actions locks while holding this inner state lock.
+        with self.lock("github-com-rate-state"):
+            return self._check_rate_locked(mutation)
+
+    def _check_rate_locked(self, mutation=False):
         state = self.load("github-com-rate")
         now = self.clock()
         if state and (
@@ -147,6 +154,10 @@ class Coordinator:
         self.save("github-com-rate", state)
 
     def rate_hold(self, *, seconds=None, policy=False):
+        with self.lock("github-com-rate-state"):
+            return self._rate_hold_locked(seconds=seconds, policy=policy)
+
+    def _rate_hold_locked(self, *, seconds=None, policy=False):
         state = self.load("github-com-rate")
         now = self.clock()
         state["observed"] = max(now, state.get("observed", 0))

@@ -556,3 +556,114 @@ def test_concurrent_apply_threads_never_duplicate_unknown_or_successful_effect(t
         assert first.result(timeout=5)["receipts"][0]["status"] == "applied"
     assert apply([a], T(), cfg)["receipts"][0]["status"] == "skipped_duplicate"
     assert len(writes) == 1
+
+
+@pytest.mark.parametrize("rate_response", ["policy", "cooldown"])
+def test_action_preflight_cannot_overwrite_concurrent_transport_hold(tmp_path, rate_response):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    from githubbot_core.actions import Action
+
+    stale_snapshot, allow_save, policy_waiting = threading.Event(), threading.Event(), threading.Event()
+    policy_started, allow_policy_response = threading.Event(), threading.Event()
+    root = tmp_path / "rate-transaction"
+
+    class ActionCoordinator(Coordinator):
+        paused = False
+
+        def save(self, name, value):
+            if name == "github-com-rate" and not self.paused:
+                self.paused = True
+                stale_snapshot.set()
+                assert allow_save.wait(5)
+            return super().save(name, value)
+
+    class PolicyCoordinator(Coordinator):
+        @contextmanager
+        def lock(self, name):
+            if name == "github-com-rate-state" and self.hold_phase:
+                policy_waiting.set()
+            with super().lock(name):
+                yield
+
+        hold_phase = False
+
+        def rate_hold(self, **kw):
+            self.hold_phase = True
+            return super().rate_hold(**kw)
+
+    action_coordinator = ActionCoordinator(root)
+    policy_coordinator = PolicyCoordinator(root)
+    commands = []
+
+    def run(command, **kw):
+        commands.append(command)
+        endpoint = command[-1]
+        if endpoint == "synthetic-policy":
+            policy_started.set()
+            assert allow_policy_response.wait(5)
+            return reply(403) if rate_response == "policy" else reply(429, "Retry-After: 120\r\n")
+        if "--method" in command:
+            pytest.fail("concurrent HOLD must prohibit the POST")
+        return reply(
+            body=json.dumps({"login": "example-bot"} if endpoint == "user" else {"full_name": "example-org/repo"})
+        )
+
+    # Outer action authority reads use another coordinator, so the controlled
+    # stale snapshot belongs exactly to _coordinated_action's preflight.
+    t = GhCliTransport(runner=run, coordinator=Coordinator(root))
+    a = Action("issue.comment", {"repo": "example-org/repo", "number": 1, "body": "synthetic"})
+    cfg = {
+        "permissions": {"ceiling": ["issue.comment"], "enabled": ["issue.comment"], "write_owners": ["example-org"]},
+        "multi_bot": {"merge_account": "example-bot"},
+    }
+    from githubbot_core.actions import _coordinated_action, plan_digest
+
+    class ActionTransport:
+        coordinator = action_coordinator
+
+        def get(self, e):
+            return t.get(e)
+
+        def request_with_intent(self, *args, **kw):
+            return t.request_with_intent(*args, **kw)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        policy = pool.submit(GhCliTransport(runner=run, coordinator=policy_coordinator).get, "synthetic-policy")
+        assert policy_started.wait(5)
+        action = pool.submit(_coordinated_action, a, ActionTransport(), cfg, plan_digest([a], cfg))
+        try:
+            assert stale_snapshot.wait(5)
+            allow_policy_response.set()
+            assert policy_waiting.wait(5), "rate_hold must acquire the same state lock"
+        finally:
+            allow_policy_response.set()
+            allow_save.set()
+        assert policy.result(timeout=10)[1]
+        result = action.result(timeout=10)
+    assert result["status"] in {"denied", "failed"}
+    state = Coordinator(root).load("github-com-rate")
+    if rate_response == "policy":
+        assert state["policy_hold"] is True
+    else:
+        assert state["not_before"] > __import__("time").time()
+    assert not any("--method" in command for command in commands)
+    assert not list(root.glob("action-*.json"))
+
+
+def test_rate_state_lock_failure_after_request_does_not_claim_nothing_sent(tmp_path):
+    class StateFailure(Coordinator):
+        def rate_hold(self, **kw):
+            raise Hold("synthetic state lock timeout")
+
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply(429, "Retry-After: 60\r\n")
+
+    t = GhCliTransport(runner=run, coordinator=StateFailure(tmp_path / "post-request"))
+    data, error = t.request("POST", "repos/example-org/repo/issues/1/comments", {"body": "synthetic"})
+    assert data is None and len(calls) == 1
+    assert "outcome unconfirmed" in error and "no request sent" not in error

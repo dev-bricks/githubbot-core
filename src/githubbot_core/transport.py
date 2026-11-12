@@ -71,6 +71,7 @@ class GhCliTransport:
         return response.body, response.error
 
     def _invoke_response(self, args, stdin=None, *, env=None, generic_errors=False, before_effect=None):
+        request_attempted = False
         # One persistent host-wide guard, shared across accounts. No retry here.
         mutation = "--method" in args and args[args.index("--method") + 1].upper() != "GET"
         if mutation and "graphql" in args and stdin:
@@ -89,9 +90,15 @@ class GhCliTransport:
                 self.coordinator.check_rate(mutation)
                 if mutation and before_effect is not None:
                     before_effect()
+                request_attempted = True
                 return self._invoke_once(args, stdin, env=env, generic_errors=generic_errors)
         except (Hold, OSError):
-            return _Response("", "GitHub coordination HOLD; no request sent", MappingProxyType({}))
+            message = (
+                "GitHub coordination HOLD after request attempt; outcome unconfirmed"
+                if request_attempted
+                else "GitHub coordination HOLD; no request sent"
+            )
+            return _Response("", message, MappingProxyType({}))
 
     def _invoke_once(self, args, stdin=None, *, env=None, generic_errors=False):
         cmd = [

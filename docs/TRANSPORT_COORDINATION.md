@@ -16,7 +16,12 @@ then this capability must not be advertised as solving multi-host concurrency.
 serializes individual gh requests and the typed Git push/readback pair. Locks
 use persistent inodes and OS advisory locking (Windows/POSIX), with bounded
 acquisition and automatic kernel release after a process dies. Never unlink a
-lock inode to recover. Ordering is actions -> transport; an enclosing wrapper
+lock inode to recover. Ordering is actions -> transport -> rate-state; each rate-state read/check/write
+transaction acquires its own innermost lock, including action preflight outside
+the transport lock. The state lock is released before any later transport call
+and never acquires an outer lock. This prevents a stale preflight snapshot from
+overwriting a concurrent policy/rate HOLD. A state-lock failure after a request
+was attempted is reported as unconfirmed, never as nothing sent. In particular, an enclosing wrapper
 must not hold the transport lock while waiting for a Core child.
 
 ## Cooldowns and policy HOLD
