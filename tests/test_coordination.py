@@ -827,3 +827,66 @@ def test_offline_recovery_of_marker_with_missing_rate_state_still_denies_network
     state = c.load("github-com-rate")
     assert state["schema"] == "githubbot-core.rate/v1" and state["policy_hold"] is True
     assert fresh_request_is_blocked(c.root)["requests"] == 0
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504, 408, 499])
+def test_ambiguous_http_write_response_keeps_marker_and_blocks_fresh_process(tmp_path, status):
+    root = tmp_path / str(status)
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        assert (root / "github-com-request.json").exists()
+        return reply(status)
+
+    data, error = GhCliTransport(runner=run, coordinator=Coordinator(root)).request(
+        "POST", "repos/example-org/repo/issues/1/comments", {"body": "synthetic"}
+    )
+    assert data is None and "outcome unconfirmed" in error and len(calls) == 1
+    assert (root / "github-com-request.json").exists()
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+@pytest.mark.parametrize("status", [400, 401, 404, 409, 422])
+def test_known_client_rejection_clears_only_transport_uncertainty(tmp_path, status):
+    root = tmp_path / str(status)
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply(status) if len(calls) == 1 else reply()
+
+    t = GhCliTransport(runner=run, coordinator=Coordinator(root))
+    data, error = t.request("POST", "repos/example-org/repo/issues/1/comments", {"body": "synthetic"})
+    assert data is None and "refused" in error and len(calls) == 1
+    assert not (root / "github-com-request.json").exists()
+    assert t.get("user") == ({"ok": True}, None) and len(calls) == 2
+
+
+def test_confirmed_client_rejection_does_not_authorize_action_repetition(tmp_path):
+    from githubbot_core.actions import Action, apply
+
+    root = tmp_path / "client-action"
+    calls = []
+
+    def run(command, **kw):
+        calls.append(command)
+        if "--method" in command:
+            return reply(422)
+        return reply(
+            body=json.dumps({"login": "example-bot"} if command[-1] == "user" else {"full_name": "example-org/repo"})
+        )
+
+    t = GhCliTransport(runner=run, coordinator=Coordinator(root))
+    cfg = {
+        "permissions": {"ceiling": ["issue.comment"], "enabled": ["issue.comment"], "write_owners": ["example-org"]},
+        "multi_bot": {"merge_account": "example-bot"},
+    }
+    a = Action("issue.comment", {"repo": "example-org/repo", "number": 1, "body": "synthetic"})
+    assert apply([a], t, cfg)["receipts"][0]["status"] == "failed"
+    assert not (root / "github-com-request.json").exists()
+    assert len([cmd for cmd in calls if "--method" in cmd]) == 1
+    result = json.loads(finish(spawn(root, "action")))
+    assert result["receipts"][0]["status"] == "failed"
+    assert "unknown write HOLD" in result["receipts"][0]["detail"]
+    assert not (root / "effects").exists()

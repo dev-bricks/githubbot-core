@@ -54,8 +54,14 @@ transport -> rate-state locks. If the marker cannot be durably written, nothing
 is sent. The marker contains a random request ID and fixed schema/status only,
 never a token, URL or body. It has no automatic expiry.
 
-Only completed transport status/header handling and confirmed rate-state
-persistence permit marker removal. A timeout, process death, malformed transport
+Only successful transport replies, explicitly recognized definitive client
+rejections, or successfully persisted rate/policy HOLD permit marker removal.
+An HTTP status alone is not confirmation: 5xx, HTTP 408 and unrecognized error
+classes preserve transport uncertainty even when their headers are readable.
+The explicit definitive client rejection set is 400/401/404/405/409/410/412/
+413/414/415/422; 403/429 use the separately persisted HOLD paths. A definitive
+transport rejection does not itself clear the action-level unknown journal or
+authorize repeating a write. A timeout, process death, malformed transport
 response, failed HOLD persistence or failed marker cleanup leaves uncertainty
 HOLD across process restarts. A fresh process must not send even a GET merely
 because the original OS lock has become available. Ordinary action preflight and

@@ -28,6 +28,9 @@ from typing import Any, Callable, Optional, Protocol
 logger = logging.getLogger(__name__)
 
 API_VERSION = "2026-03-10"
+# Explicit, definitive client rejection classes. In particular, HTTP 408,
+# nonstandard errors and all 5xx replies do not prove the request's outcome.
+_DEFINITE_CLIENT_REJECTIONS = frozenset({400, 401, 404, 405, 409, 410, 412, 413, 414, 415, 422})
 
 
 class Transport(Protocol):
@@ -185,11 +188,13 @@ class GhCliTransport:
             self.coordinator.rate_hold(policy=True)
             return response("", "GitHub policy HOLD; no automatic retry or account fallback", True)
         if result.returncode or (status is not None and status >= 400):
-            return response(
-                "",
-                "GitHub request failed" if generic_errors else "GitHub request failed; outcome unconfirmed",
-                status is not None,
+            confirmed_rejection = status in _DEFINITE_CLIENT_REJECTIONS
+            detail = (
+                f"GitHub request refused (HTTP {status}); action readback may be required"
+                if confirmed_rejection
+                else "GitHub request failed; outcome unconfirmed"
             )
+            return response("", "GitHub request failed" if generic_errors else detail, confirmed_rejection)
         return response(stdout, None, True)
 
     def get_for_token(self, token: str, endpoint: str) -> tuple[Any, Optional[str]]:
