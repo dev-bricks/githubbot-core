@@ -318,3 +318,6 @@ Review-/Merge-Leseprüfungen können unbekannte Ergebnisse bestätigen; andere b
 gesperrt. Die Garantie gilt für kooperierende Prozesse mit gemeinsamem lokalem
 Zustand, nicht für mehrere Hosts. Einzelheiten und Wiederaufnahmegrenzen stehen
 im [Koordinationsvertrag](docs/TRANSPORT_COORDINATION.md).
+
+
+Nur eine finale HTTP-2xx-Antwort kann einen erfolgreichen Transportaufruf abschließen. Eine isolierte 1xx-/3xx-Antwort erhält auch bei CLI-Exitcode null den Unsicherheitsmarker und sperrt Folgeanfragen. Der Core folgt keinem Redirect und wiederholt keinen Request. Die Redirect-Verarbeitung liegt bei GitHub CLI; dessen `--include` gibt die finale Antwort aus. Eindeutige Client-Ablehnungen und Rate-/Policy-HOLDs bleiben getrennt behandelt; 5xx, Zeitüberschreitungen und mehrdeutige Ausgänge bleiben gesperrt. Eine 2xx-Transportantwort ersetzt keine aktionsspezifische Ergebnisprüfung.

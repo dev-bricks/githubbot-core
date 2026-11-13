@@ -890,3 +890,86 @@ def test_confirmed_client_rejection_does_not_authorize_action_repetition(tmp_pat
     assert result["receipts"][0]["status"] == "failed"
     assert "unknown write HOLD" in result["receipts"][0]["detail"]
     assert not (root / "effects").exists()
+
+
+@pytest.mark.parametrize("status", [100, 101, 199, 300, 301, 302, 303, 304, 307, 308, 399])
+def test_nonfinal_http_status_never_resolves_request_or_allows_fresh_process(tmp_path, status):
+    root = tmp_path / str(status)
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        assert (root / "github-com-request.json").exists()
+        # Original reported shape: successful process, empty HTTP/1.1 302 body.
+        return SimpleNamespace(returncode=0, stdout=f"HTTP/1.1 {status} Synthetic\r\n\r\n", stderr="")
+
+    data, error = GhCliTransport(runner=run, coordinator=Coordinator(root)).request(
+        "POST", "repos/example-org/repo/issues/1/comments", {"body": "synthetic"}
+    )
+    assert data is None and error and "outcome unconfirmed" in error
+    assert len(calls) == 1 and (root / "github-com-request.json").exists()
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+@pytest.mark.parametrize("status,body", [(200, '{"id": 1}'), (201, '{"id": 2}'), (202, '{}'), (204, '')])
+def test_final_2xx_response_can_finish_transport_request(tmp_path, status, body):
+    root = tmp_path / str(status)
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        # gh --include prints the final response after its HTTP client follows redirects.
+        return reply(status, body=body) if len(calls) == 1 else reply()
+
+    transport = GhCliTransport(runner=run, coordinator=Coordinator(root))
+    data, error = transport.request("POST", "repos/example-org/repo/issues/1/comments", {})
+    assert error is None
+    assert data == (json.loads(body) if body else None)
+    assert not (root / "github-com-request.json").exists()
+    assert transport.get("user") == ({"ok": True}, None) and len(calls) == 2
+
+
+def test_redirect_action_retains_unknown_journal_and_blocks_fresh_action(tmp_path):
+    from githubbot_core.actions import Action, apply
+
+    root = tmp_path / "redirect-action"
+    calls = []
+
+    def run(command, **kw):
+        calls.append(command)
+        if "--method" in command:
+            return SimpleNamespace(returncode=0, stdout="HTTP/1.1 302 Found\r\n\r\n", stderr="")
+        return reply(body=json.dumps(
+            {"login": "example-bot"} if command[-1] == "user" else {"full_name": "example-org/repo"}
+        ))
+
+    c = Coordinator(root)
+    transport = GhCliTransport(runner=run, coordinator=c)
+    config = {
+        "permissions": {"ceiling": ["issue.comment"], "enabled": ["issue.comment"], "write_owners": ["example-org"]},
+        "multi_bot": {"merge_account": "example-bot"},
+    }
+    action = Action("issue.comment", {"repo": "example-org/repo", "number": 1, "body": "synthetic"})
+    result = apply([action], transport, config)
+    assert result["receipts"][0]["status"] == "failed"
+    assert c.load(c.action_key(action.action_id))["status"] == "unknown"
+    assert (root / "github-com-request.json").exists()
+    assert len([cmd for cmd in calls if "--method" in cmd]) == 1
+    assert fresh_request_is_blocked(root)["requests"] == 0
+    result = json.loads(finish(spawn(root, "action")))
+    assert result["receipts"][0]["status"] == "failed"
+    assert not (root / "effects").exists()
+
+
+@pytest.mark.parametrize("status", [101, 302, 307, 500])
+def test_rate_metadata_never_confirms_ambiguous_status(tmp_path, status):
+    root = tmp_path / str(status)
+    def run(*args, **kw):
+        return reply(status, "Retry-After: 1\r\nX-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: 1\r\n",
+                     error="gh: rate limit exceeded")
+    data, error = GhCliTransport(runner=run, coordinator=Coordinator(root)).request(
+        "POST", "repos/example-org/repo/issues/1/comments", {}
+    )
+    assert data is None and "outcome unconfirmed" in error
+    assert (root / "github-com-request.json").exists()
+    assert fresh_request_is_blocked(root)["requests"] == 0

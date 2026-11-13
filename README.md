@@ -309,3 +309,6 @@ readbacks can reconcile unknown effects; other unknown effects remain blocked.
 This covers cooperating processes sharing one local state root, not multiple
 hosts. See [transport coordination](docs/TRANSPORT_COORDINATION.md) for recovery
 limits, local-state requirements and deliberate deduplication behavior.
+
+
+Only a final HTTP 2xx response can complete a successful transport request. An isolated 1xx or 3xx response (even with CLI exit code zero) preserves the uncertainty marker and blocks subsequent requests; the core does not follow or retry redirects. GitHub CLI owns HTTP redirect handling and its `--include` output contains the final response. Definitive client rejections and rate/policy HOLDs retain their separate handling; 5xx, timeouts and ambiguous outcomes stay blocked. A 2xx transport response does not replace action-specific semantic readbacks.
