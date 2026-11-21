@@ -4,6 +4,7 @@
     "description": "Neutral defaults. Override with --config <file> layers; permission ceilings can only be narrowed by later layers."
   },
   "permissions": {
+    "write_owners": null,
     "ceiling": [
       "issue.add_labels",
       "issue.comment",

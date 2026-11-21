@@ -21,7 +21,7 @@ def config(*, enabled=True, policy=True, repos=None):
             (
                 "instance",
                 {
-                    "permissions": {"enabled": ["pr.close"] if enabled else []},
+                    "permissions": {"enabled": ["pr.close"] if enabled else [], "write_owners": ["example-org"]},
                     "multi_bot": {"merge_account": "example-bot", "policy": {"close_integrated_prs": policy}},
                     "typed_actions": {"close_repositories": [REPO] if repos is None else repos},
                 },
@@ -63,7 +63,7 @@ class Transport:
         if endpoint == "user":
             data = {"login": self.login}
         elif endpoint == f"repos/{REPO}":
-            data = {"default_branch": self.branch}
+            data = {"default_branch": self.branch, "full_name": REPO}
         elif endpoint.startswith(f"repos/{REPO}/git/ref/heads/"):
             data = self.ref_answers.pop(0) if self.ref_answers else self.ref
         elif endpoint == ENDPOINT:
@@ -139,7 +139,7 @@ def test_integrated_draft_or_stack_can_close_with_exact_readback():
     }
     assert t.writes == [("PATCH", ENDPOINT, {"state": "closed"})]
     assert t.reads.count(ENDPOINT) == 3
-    assert t.reads.count("user") == 2
+    assert t.reads.count("user") == 3  # central authority check plus both existing close checks
 
 
 def test_identical_head_and_default_branch_can_close():
@@ -201,11 +201,12 @@ def test_identity_default_branch_movement_and_api_errors_fail_closed():
     for endpoint in ["user", f"repos/{REPO}", ENDPOINT, f"repos/{REPO}/compare/{SHA}...{MAIN}"]:
         t = Transport()
         t.errors[endpoint] = "unreadable"
-        assert apply(t)["receipts"][0]["status"] == "failed"
+        expected = "denied" if endpoint in {"user", f"repos/{REPO}"} else "failed"
+        assert apply(t)["receipts"][0]["status"] == expected
         assert not t.writes
     t = Transport()
     t.login = "other-account"
-    assert apply(t)["receipts"][0]["status"] == "failed"
+    assert apply(t)["receipts"][0]["status"] == "denied"
     assert not t.writes
 
 

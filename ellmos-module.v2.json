@@ -1,0 +1,30 @@
+{
+  "schema": "ellmos.module.v2",
+  "id": "githubbot-core",
+  "display_name": "githubbot-core",
+  "version": "0.2.1",
+  "category": "tools",
+  "kind": "tool",
+  "status": "alpha",
+  "visibility": "public",
+  "description": "Neutral GitHub maintenance CLI and library with explicit preview/apply authority.",
+  "package": "githubbot-core",
+  "entrypoints": {"cli": "githubbot-core", "python": "githubbot_core"},
+  "provides": ["github.maintenance", "github.preview-apply"],
+  "requires": [],
+  "optional": [],
+  "conflicts": [],
+  "surfaces": ["library", "cli"],
+  "state": {"ownership": "external", "location": "project"},
+  "boundaries": {
+    "network": "transport-defined",
+    "data": "application-defined",
+    "platforms": ["windows", "macos", "linux"]
+  },
+  "source_of_truth": {
+    "type": "git-repository",
+    "path": ".",
+    "repository": "https://github.com/dev-bricks/githubbot-core"
+  },
+  "adapters": []
+}
