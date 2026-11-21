@@ -51,8 +51,11 @@ def permission_contract(config, layers):
     authority = binding(config)
     permissions["write_owners"] = authority["write_owners"]
     permissions["expected_actor"] = authority["expected_actor"]
-    permissions["effective_enabled"] = [kind for kind in permissions["enabled"]
-        if authority["write_owners"] and authority["expected_actor"] and not switch_denial(kind, config)]
+    permissions["effective_enabled"] = [
+        kind
+        for kind in permissions["enabled"]
+        if authority["write_owners"] and authority["expected_actor"] and not switch_denial(kind, config)
+    ]
     return {"permissions": permissions, "config_layers": [str(Path(path).expanduser().resolve()) for path in layers]}
 
 

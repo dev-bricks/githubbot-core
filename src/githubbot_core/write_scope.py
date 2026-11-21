@@ -3,6 +3,7 @@
 No instance identities or organizations belong here. An unbound scope denies
 writes; previews and reads remain available. Raw opaque targets fail closed.
 """
+
 from __future__ import annotations
 
 import re
@@ -10,8 +11,18 @@ import re
 OWNER = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?", re.ASCII)
 ACTOR = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?(?:\[bot\])?", re.ASCII)
 REPOSITORY = re.compile(r"([^/]+)/([A-Za-z0-9_.-]+)", re.ASCII)
-REPO_ACTIONS = {"issue.comment", "issue.add_labels", "pr.merge", "pr.ready", "pr.review", "pr.close",
-                "pr.create", "git.push_branch", "actions.dispatch", "actions.rerun"}
+REPO_ACTIONS = {
+    "issue.comment",
+    "issue.add_labels",
+    "pr.merge",
+    "pr.ready",
+    "pr.review",
+    "pr.close",
+    "pr.create",
+    "git.push_branch",
+    "actions.dispatch",
+    "actions.rerun",
+}
 
 
 def normalize_owners(value):
@@ -49,8 +60,12 @@ def target(kind, params):
     method = params.get("method")
     if not isinstance(method, str) or method.upper() not in {"POST", "PUT", "PATCH", "DELETE"}:
         raise ValueError("api.request method is not a write method")
-    if (not isinstance(endpoint, str) or any(c in endpoint for c in "%?#{}\\")
-            or ".." in endpoint or endpoint.startswith("//")):
+    if (
+        not isinstance(endpoint, str)
+        or any(c in endpoint for c in "%?#{}\\")
+        or ".." in endpoint
+        or endpoint.startswith("//")
+    ):
         raise ValueError("raw write target is ambiguous")
     star = re.fullmatch(r"/?user/starred/([^/]+/[^/]+)", endpoint)
     if star:

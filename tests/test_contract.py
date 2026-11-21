@@ -56,8 +56,10 @@ def _triage_gets():
 
 def _write_profile(tmp_path):
     path = tmp_path / "write-profile.json"
-    path.write_text(json.dumps({"permissions": {"write_owners": ["example-org"]},
-                               "multi_bot": {"merge_account": "example-bot"}}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"permissions": {"write_owners": ["example-org"]}, "multi_bot": {"merge_account": "example-bot"}}),
+        encoding="utf-8",
+    )
     return ["--config", str(path)]
 
 
@@ -81,13 +83,19 @@ def test_apply_writes_only_permitted_actions_and_is_idempotent(fake_transport, t
     transport = fake_transport(_triage_gets())
     store = tmp_path / "receipts.jsonl"
     grant = _write_profile(tmp_path)
-    assert cli.main([*grant, "--json", "triage", "--repo", REPO, "--apply", "--receipts", str(store)], transport=transport) == 0
+    assert (
+        cli.main([*grant, "--json", "triage", "--repo", REPO, "--apply", "--receipts", str(store)], transport=transport)
+        == 0
+    )
     first = json.loads(capsys.readouterr().out)
     assert first["mode"] == "apply"
     assert len(transport.writes) == 3
     assert {r["status"] for r in first["data"]["receipts"]} == {"applied"}
 
-    assert cli.main([*grant, "--json", "triage", "--repo", REPO, "--apply", "--receipts", str(store)], transport=transport) == 0
+    assert (
+        cli.main([*grant, "--json", "triage", "--repo", REPO, "--apply", "--receipts", str(store)], transport=transport)
+        == 0
+    )
     second = json.loads(capsys.readouterr().out)
     assert len(transport.writes) == 3  # nothing repeated
     assert {r["status"] for r in second["data"]["receipts"]} == {"skipped_duplicate"}
@@ -117,8 +125,17 @@ def test_api_request_needs_matching_prefix(fake_transport):
     config = merge_layers(
         [
             ("default", default_config()),
-            ("profile", {"permissions": {"enabled": ["api.request"], "api_write_prefixes": ["user/starred/"],
-                                        "write_owners": ["o"]}, "multi_bot": {"merge_account": "example-bot"}}),
+            (
+                "profile",
+                {
+                    "permissions": {
+                        "enabled": ["api.request"],
+                        "api_write_prefixes": ["user/starred/"],
+                        "write_owners": ["o"],
+                    },
+                    "multi_bot": {"merge_account": "example-bot"},
+                },
+            ),
         ]
     )
     allowed = Action("api.request", {"method": "PUT", "endpoint": "user/starred/o/r"})
@@ -133,7 +150,9 @@ def test_api_request_needs_matching_prefix(fake_transport):
 
 def test_failed_write_is_reported(fake_transport, capsys, tmp_path):
     transport = fake_transport(_triage_gets(), fail_writes=True)
-    assert cli.main([*_write_profile(tmp_path), "--json", "triage", "--repo", REPO, "--apply"], transport=transport) == 1
+    assert (
+        cli.main([*_write_profile(tmp_path), "--json", "triage", "--repo", REPO, "--apply"], transport=transport) == 1
+    )
     out = json.loads(capsys.readouterr().out)
     assert out["ok"] is False and {r["status"] for r in out["data"]["receipts"]} == {"failed"}
 
@@ -237,8 +256,16 @@ def test_plugin_plan_preview_and_denied_apply(demo_plugin, fake_transport, capsy
 def test_plugin_plan_apply_when_profile_allows(demo_plugin, fake_transport, tmp_path, capsys):
     profile = tmp_path / "profile.json"
     profile.write_text(
-        json.dumps({"permissions": {"enabled": ["api.request"], "api_write_prefixes": ["user/starred/"],
-                                    "write_owners": ["o"]}, "multi_bot": {"merge_account": "example-bot"}}),
+        json.dumps(
+            {
+                "permissions": {
+                    "enabled": ["api.request"],
+                    "api_write_prefixes": ["user/starred/"],
+                    "write_owners": ["o"],
+                },
+                "multi_bot": {"merge_account": "example-bot"},
+            }
+        ),
         encoding="utf-8",
     )
     transport = fake_transport({"user": {"login": "example-bot"}, "repos/o/r": {"full_name": "o/r"}})

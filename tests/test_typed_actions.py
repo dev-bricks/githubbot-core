@@ -50,7 +50,11 @@ class Transport:
     """GET answers may be lists (one entry per call, the last repeats); writes are recorded."""
 
     def __init__(self, gets, write_result=None):
-        gets = {"user": {"login": "example-bot"}, f"repos/{REPO}": {"default_branch": "main", "full_name": REPO}, **gets}
+        gets = {
+            "user": {"login": "example-bot"},
+            f"repos/{REPO}": {"default_branch": "main", "full_name": REPO},
+            **gets,
+        }
         if isinstance(gets.get(f"repos/{REPO}"), dict):
             gets[f"repos/{REPO}"] = {"full_name": REPO, **gets[f"repos/{REPO}"]}
         self.gets = {key: value if isinstance(value, list) else [value] for key, value in gets.items()}
@@ -654,7 +658,11 @@ def test_run_contract_reports_effective_enabled(tmp_path):
         json.dumps(
             {
                 "permissions": {"enabled": ["issue.comment", "pr.merge", "pr.ready"], "write_owners": ["example-org"]},
-                "multi_bot": {"merge_account": "example-bot", "merge_enabled": True, "policy": {"draft_auto_ready_hours": None}},
+                "multi_bot": {
+                    "merge_account": "example-bot",
+                    "merge_enabled": True,
+                    "policy": {"draft_auto_ready_hours": None},
+                },
             }
         )
     )
@@ -667,8 +675,13 @@ def test_run_contract_reports_effective_enabled(tmp_path):
 def test_cli_act_previews_then_applies_with_expected_plan(tmp_path, capsys):
     layer = tmp_path / "instance.json"
     layer.write_text(
-        json.dumps({"permissions": {"enabled": ["pr.merge"], "write_owners": ["example-org"]},
-                    "multi_bot": {"merge_account": "example-bot", "merge_enabled": True}}), encoding="utf-8"
+        json.dumps(
+            {
+                "permissions": {"enabled": ["pr.merge"], "write_owners": ["example-org"]},
+                "multi_bot": {"merge_account": "example-bot", "merge_enabled": True},
+            }
+        ),
+        encoding="utf-8",
     )
     params = json.dumps({"repo": REPO, "number": 7, "sha": SHA})
     transport = Transport(base_gets())
