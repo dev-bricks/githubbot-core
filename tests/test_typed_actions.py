@@ -244,6 +244,7 @@ def test_ready_uses_graphql_for_the_exact_draft_head(tmp_path):
     gets[f"repos/{REPO}/pulls/7"] = pull(draft=True, base={"ref": "feature"})
     transport = Transport(gets)
     from githubbot_core.coordination import Coordinator
+
     transport.coordinator = Coordinator(tmp_path / "independent-invalid-base")
     assert actions.apply([action], transport, config())["receipts"][0]["status"] == "failed"
     assert transport.writes == []

@@ -733,6 +733,7 @@ def exec_push_branch(transport, params: dict, config: dict):
     try:
         with _git_auth_environment(token, account) as env:
             from .coordination import Coordinator
+
             coordinator = getattr(transport, "coordinator", None) or Coordinator()
             with coordinator.lock("github-com-transport"):
                 request_id = coordinator.begin_request(mutation=True)

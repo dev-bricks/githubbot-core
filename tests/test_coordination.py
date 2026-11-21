@@ -268,16 +268,19 @@ def test_pagination_holds_without_returning_partial_results(tmp_path):
 
 def test_lock_timeout_never_unlinks_guard(tmp_path):
     root = tmp_path / "busy"
-    child = spawn(root, "request")
-    deadline = __import__("time").monotonic() + 10
-    while not (root / "trace").exists():
-        assert __import__("time").monotonic() < deadline
-        __import__("time").sleep(0.01)
-    c = Coordinator(root, timeout=0.01)
-    with pytest.raises(Hold):
-        with c.lock("github-com-transport"):
-            pytest.fail("must not acquire")
-    finish(child)
+    child = spawn(root, "barrier")
+    try:
+        deadline = __import__("time").monotonic() + 10
+        while not (root / "trace").exists():
+            assert __import__("time").monotonic() < deadline
+            __import__("time").sleep(0.01)
+        c = Coordinator(root, timeout=0.01)
+        with pytest.raises(Hold):
+            with c.lock("github-com-transport"):
+                pytest.fail("must not acquire")
+    finally:
+        (root / "release").write_text("release", encoding="utf-8")
+        finish(child)
     assert (root / "github-com-transport.lock").exists()
 
 
@@ -911,7 +914,7 @@ def test_nonfinal_http_status_never_resolves_request_or_allows_fresh_process(tmp
     assert fresh_request_is_blocked(root)["requests"] == 0
 
 
-@pytest.mark.parametrize("status,body", [(200, '{"id": 1}'), (201, '{"id": 2}'), (202, '{}'), (204, '')])
+@pytest.mark.parametrize("status,body", [(200, '{"id": 1}'), (201, '{"id": 2}'), (202, "{}"), (204, "")])
 def test_final_2xx_response_can_finish_transport_request(tmp_path, status, body):
     root = tmp_path / str(status)
     calls = []
@@ -939,9 +942,9 @@ def test_redirect_action_retains_unknown_journal_and_blocks_fresh_action(tmp_pat
         calls.append(command)
         if "--method" in command:
             return SimpleNamespace(returncode=0, stdout="HTTP/1.1 302 Found\r\n\r\n", stderr="")
-        return reply(body=json.dumps(
-            {"login": "example-bot"} if command[-1] == "user" else {"full_name": "example-org/repo"}
-        ))
+        return reply(
+            body=json.dumps({"login": "example-bot"} if command[-1] == "user" else {"full_name": "example-org/repo"})
+        )
 
     c = Coordinator(root)
     transport = GhCliTransport(runner=run, coordinator=c)
@@ -964,12 +967,67 @@ def test_redirect_action_retains_unknown_journal_and_blocks_fresh_action(tmp_pat
 @pytest.mark.parametrize("status", [101, 302, 307, 500])
 def test_rate_metadata_never_confirms_ambiguous_status(tmp_path, status):
     root = tmp_path / str(status)
+
     def run(*args, **kw):
-        return reply(status, "Retry-After: 1\r\nX-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: 1\r\n",
-                     error="gh: rate limit exceeded")
+        return reply(
+            status,
+            "Retry-After: 1\r\nX-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: 1\r\n",
+            error="gh: rate limit exceeded",
+        )
+
     data, error = GhCliTransport(runner=run, coordinator=Coordinator(root)).request(
         "POST", "repos/example-org/repo/issues/1/comments", {}
     )
     assert data is None and "outcome unconfirmed" in error
     assert (root / "github-com-request.json").exists()
     assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+@pytest.mark.parametrize("method_name", ["get", "get_paginated", "get_text", "get_for_token", "request_get"])
+def test_headerless_successful_get_keeps_marker_and_rejects_result(tmp_path, monkeypatch, method_name):
+    root = tmp_path / method_name
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        assert (root / "github-com-request.json").exists()
+        return subprocess.CompletedProcess(cmd, 0, '{"ok": true}', "")
+
+    monkeypatch.setattr("githubbot_core.transport.subprocess.run", fake_run)
+    transport = GhCliTransport(coordinator=Coordinator(root))
+    if method_name == "get":
+        data, error = transport.get("user")
+        assert data is None and error and "outcome unconfirmed" in error
+    elif method_name == "get_paginated":
+        data, error = transport.get_paginated("repos/example-org/repo/issues")
+        assert data == [] and error and "outcome unconfirmed" in error
+    elif method_name == "get_text":
+        data, error = transport.get_text("repos/example-org/repo/pulls/1", "application/vnd.github.diff")
+        assert data == "" and error and "outcome unconfirmed" in error
+    elif method_name == "get_for_token":
+        data, error = transport.get_for_token("synthetic-token", "user")
+        assert data is None and error == "GitHub request failed"
+    else:
+        data, error = transport.request("GET", "user")
+        assert data is None and error and "outcome unconfirmed" in error
+    assert len(calls) == 1
+    assert (root / "github-com-request.json").exists()
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+def test_nonzero_cli_403_without_headers_still_persists_hold_for_real_subprocess(tmp_path, monkeypatch):
+    root = tmp_path / "cli-403"
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, "", "gh: Forbidden (HTTP 403)")
+
+    monkeypatch.setattr("githubbot_core.transport.subprocess.run", fake_run)
+    transport = GhCliTransport(coordinator=Coordinator(root))
+    data, error = transport.request("POST", "repos/example-org/repo/issues/1/comments", {"body": "synthetic"})
+    assert data is None and "policy HOLD" in error
+    assert len(calls) == 1
+    assert not (root / "github-com-request.json").exists()
+    assert transport.get("user")[1] == "GitHub coordination HOLD; no request sent"
+    assert len(calls) == 1

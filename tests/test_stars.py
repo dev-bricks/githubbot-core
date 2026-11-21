@@ -20,7 +20,9 @@ class TestStarsFetcher(unittest.TestCase):
 
     @patch("githubbot_core.transport.subprocess.run")
     def test_fetch_reads_stargazers_count(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess([], 0, json.dumps({"stargazers_count": 42}), "")
+        mock_run.return_value = subprocess.CompletedProcess(
+            [], 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps({"stargazers_count": 42}), ""
+        )
 
         fetcher = StarsFetcher()
         result = fetcher.fetch("org/repo")
@@ -42,7 +44,7 @@ class TestStarsFetcher(unittest.TestCase):
 
     @patch("githubbot_core.transport.subprocess.run")
     def test_fetch_records_json_error_detail(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess([], 0, "not-json", "")
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "HTTP/2.0 200 OK\r\n\r\nnot-json", "")
 
         result = StarsFetcher().fetch("org/broken-json")
 
@@ -58,7 +60,7 @@ class TestStarsFetcher(unittest.TestCase):
 
         def fake_run(cmd, **_kwargs):
             endpoint = cmd[-1]
-            return subprocess.CompletedProcess(cmd, 0, json.dumps(payloads[endpoint]), "")
+            return subprocess.CompletedProcess(cmd, 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps(payloads[endpoint]), "")
 
         mock_run.side_effect = fake_run
 

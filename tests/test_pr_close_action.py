@@ -219,6 +219,7 @@ def test_write_timeout_or_readback_race_never_claims_success_or_retries(tmp_path
     assert len(t.writes) == 1
     for index, changes in enumerate([{"head": {"sha": OTHER}}, {"merged": True}, {"number": 8}]):
         from githubbot_core.coordination import Coordinator
+
         t = Transport()
         t.coordinator = Coordinator(tmp_path / str(index))
         t.readback_changes = changes

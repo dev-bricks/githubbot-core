@@ -154,15 +154,23 @@ class GhCliTransport:
                     if key.lower() in headers:
                         return response("", "GitHub response headers ambiguous; outcome unconfirmed")
                     headers[key.lower()] = value.strip()
-        elif self._runner is None and "--method" in args:
-            return response("", "GitHub response headers missing; outcome unconfirmed")
+        elif self._runner is None and not result.returncode:
+            return response(
+                "",
+                "GitHub request failed" if generic_errors else "GitHub response headers missing; outcome unconfirmed",
+            )
         # gh --include emits the final response returned by its HTTP client.
         # Neither an unfinished redirect nor an ambiguous server response can
         # become confirmed merely because it carries rate-limit metadata.
-        if (status is not None and not 200 <= status < 300
-                and status not in _DEFINITE_CLIENT_REJECTIONS and status not in {403, 429}):
-            return response("", "GitHub request failed" if generic_errors else
-                            "GitHub request failed; outcome unconfirmed")
+        if (
+            status is not None
+            and not 200 <= status < 300
+            and status not in _DEFINITE_CLIENT_REJECTIONS
+            and status not in {403, 429}
+        ):
+            return response(
+                "", "GitHub request failed" if generic_errors else "GitHub request failed; outcome unconfirmed"
+            )
         diagnostic = result.stderr or ""
         # CLI error channel only; never infer a limit from arbitrary response bodies.
         if status is None and result.returncode:
