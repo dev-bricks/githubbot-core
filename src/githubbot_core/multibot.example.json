@@ -14,6 +14,23 @@
       "unknown_author": "hold",
       "draft_auto_ready_hours": null,
       "draft_ready_when_mature": false,
+      "draft_auto_ready_hold_labels": [
+        "do-not-merge",
+        "hold",
+        "wip",
+        "blocked",
+        "on-hold",
+        "needs-approval"
+      ],
+      "draft_auto_ready_hold_title_signals": [
+        "nicht mergen",
+        "do not merge",
+        "don't merge",
+        "[hold]",
+        "[wip]",
+        "wip:"
+      ],
+      "draft_auto_ready_exclude_repos": [],
       "trigger_missing_ci": false,
       "publish_reviews": false,
       "open_fix_prs": false

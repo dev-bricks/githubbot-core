@@ -196,6 +196,12 @@ und ersetzen weder Merge-Opt-in noch Identitätsprüfung.
   nennt Problem und Tests, keine Konflikte. Danach gilt der normale Ablauf am dann frisch
   gelesenen Head (unabhängige Prüfung, alle Merge-Gates). Gestapelte Drafts (Base ist nicht der
   Default-Branch) und Drafts mit aktivem Hold oder Lock bleiben unberührt.
+  `draft_auto_ready_hold_labels` (String-Liste, konservativer Standard u. a. `do-not-merge`,
+  `hold`, `wip`, `blocked`, `on-hold`, `needs-approval`) und `draft_auto_ready_hold_title_signals`
+  (String-Liste, konservativer Standard u. a. `nicht mergen`, `do not merge`, `don't merge`,
+  `[hold]`, `[wip]`, `wip:`) blockieren `pr.ready` zusätzlich technisch (case-insensitive).
+  `draft_auto_ready_exclude_repos` (Liste von `owner/repo`, Standard `[]`) nimmt explizit
+  freigabepflichtige Repositories vollständig von `pr.ready` aus.
 - `trigger_missing_ci` (bool): Hat der exakte Head keine Check-Läufe, darf der Bot sie
   anstoßen: Core-Aktion `actions.dispatch` (Workflow mit `workflow_dispatch`, `--ref <Branch>`)
   oder `actions.rerun` eines abgeschlossenen früheren Laufs desselben Heads. Verboten bleiben leere Commits,

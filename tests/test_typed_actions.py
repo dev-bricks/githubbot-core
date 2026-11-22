@@ -234,7 +234,10 @@ def test_merge_api_2026_does_not_query_when_rest_has_not_confirmed_the_merge():
 
 def test_ready_uses_graphql_for_the_exact_draft_head():
     gets = base_gets()
-    gets[f"repos/{REPO}/pulls/7"] = [pull(draft=True), pull(draft=False)]
+    gets[f"repos/{REPO}/pulls/7"] = [
+        pull(draft=True, title="feat: mature draft ready for review", labels=[{"name": "enhancement"}]),
+        pull(draft=False),
+    ]
     transport = Transport(gets, write_result={"data": {"markPullRequestReadyForReview": {}}})
     action = Action("pr.ready", {"repo": REPO, "number": 7, "sha": SHA})
     receipt = actions.apply([action], transport, config())["receipts"][0]
@@ -245,6 +248,100 @@ def test_ready_uses_graphql_for_the_exact_draft_head():
     transport = Transport(gets)
     assert actions.apply([action], transport, config())["receipts"][0]["status"] == "failed"
     assert transport.writes == []
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "feat: Vorschau — nicht mergen ohne LG-Freigabe",
+        "Do Not Merge: preview build",
+        "chore: don't merge before review",
+        "[HOLD] wait for sign-off",
+        "[wip] draft implementation",
+        "WIP: refactor config",
+    ],
+)
+def test_ready_blocks_draft_with_hold_title_signal(title):
+    gets = base_gets()
+    gets[f"repos/{REPO}/pulls/7"] = pull(draft=True, title=title, labels=[])
+    transport = Transport(gets, write_result={"data": {"markPullRequestReadyForReview": {}}})
+    action = Action("pr.ready", {"repo": REPO, "number": 7, "sha": SHA})
+    receipt = actions.apply([action], transport, config())["receipts"][0]
+    assert receipt["status"] == "failed"
+    assert "hold signal" in receipt["detail"]
+    assert transport.writes == []
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "do-not-merge",
+        "HOLD",
+        "wip",
+        "Blocked",
+        "On Hold",
+        "needs-approval",
+    ],
+)
+def test_ready_blocks_draft_with_hold_label(label):
+    gets = base_gets()
+    gets[f"repos/{REPO}/pulls/7"] = pull(draft=True, title="feat: clean title", labels=[{"name": label}])
+    transport = Transport(gets, write_result={"data": {"markPullRequestReadyForReview": {}}})
+    action = Action("pr.ready", {"repo": REPO, "number": 7, "sha": SHA})
+    receipt = actions.apply([action], transport, config())["receipts"][0]
+    assert receipt["status"] == "failed"
+    assert "hold label" in receipt["detail"]
+    assert transport.writes == []
+
+
+def test_ready_blocks_excluded_repository_in_preview_and_apply():
+    excluded_repo = "um-bruch/umbruch-website"
+    cfg = merge_layers(
+        [
+            ("default", default_config()),
+            (
+                "instance",
+                {
+                    "permissions": {"enabled": ["pr.ready"], "write_owners": ["um-bruch"]},
+                    "multi_bot": {
+                        "merge_account": "example-bot",
+                        "policy": {
+                            "draft_auto_ready_hours": 24,
+                            "draft_ready_when_mature": True,
+                            "draft_auto_ready_exclude_repos": [excluded_repo],
+                        },
+                    },
+                },
+            ),
+        ]
+    )
+    action = Action("pr.ready", {"repo": excluded_repo, "number": 27, "sha": SHA})
+    reason = actions.denial_reason(action, cfg)
+    assert reason is not None and "draft_auto_ready_exclude_repos" in reason
+    transport = Transport({f"repos/{excluded_repo}": {"default_branch": "main", "full_name": excluded_repo}})
+    receipt = actions.apply([action], transport, cfg)["receipts"][0]
+    assert receipt["status"] == "denied"
+    assert transport.writes == []
+
+
+def test_ready_respects_custom_hold_lists_and_fails_closed_on_malformed_pull():
+    custom_cfg = config(
+        draft_auto_ready_hold_labels=["awaiting-lg"],
+        draft_auto_ready_hold_title_signals=["WAIT:"],
+    )
+    action = Action("pr.ready", {"repo": REPO, "number": 7, "sha": SHA})
+    gets = base_gets()
+    gets[f"repos/{REPO}/pulls/7"] = pull(draft=True, title="wait: check", labels=[])
+    assert actions.apply([action], Transport(gets), custom_cfg)["receipts"][0]["status"] == "failed"
+
+    gets[f"repos/{REPO}/pulls/7"] = pull(draft=True, title="ok", labels=[{"name": "Awaiting-LG"}])
+    assert actions.apply([action], Transport(gets), custom_cfg)["receipts"][0]["status"] == "failed"
+
+    gets[f"repos/{REPO}/pulls/7"] = pull(draft=True, title=123, labels=[])
+    assert actions.apply([action], Transport(gets), config())["receipts"][0]["status"] == "failed"
+
+    gets[f"repos/{REPO}/pulls/7"] = pull(draft=True, title="ok", labels="not-a-list")
+    assert actions.apply([action], Transport(gets), config())["receipts"][0]["status"] == "failed"
 
 
 def test_rerun_refuses_fork_runs_other_heads_and_running_runs():
