@@ -4,7 +4,7 @@
 
 Vielen Dank für Ihr Interesse, zu diesem Projekt beizutragen!
 
-### Wie Sie beitragen koennen
+### Wie Sie beitragen können
 
 1. **Bug melden:** Erstellen Sie ein Issue mit dem Label `bug`
 2. **Feature vorschlagen:** Erstellen Sie ein Issue mit dem Label `enhancement`
