@@ -111,10 +111,7 @@ def policy_settings(raw):
     unknown = sorted(set(raw) - set(POLICY_DEFAULTS))
     if unknown:
         raise ValueError(f"unknown multi_bot.policy keys: {unknown}")
-    policy = {
-        key: list(default) if isinstance(default, list) else default
-        for key, default in POLICY_DEFAULTS.items()
-    }
+    policy = {key: list(default) if isinstance(default, list) else default for key, default in POLICY_DEFAULTS.items()}
     policy.update(raw)
     for key, allowed in _POLICY_CHOICES.items():
         if policy[key] not in allowed:
@@ -130,9 +127,7 @@ def policy_settings(raw):
     try:
         policy["draft_auto_ready_exclude_repos"] = [repository(repo) for repo in exclude_repos]
     except ValueError as exc:
-        raise ValueError(
-            "multi_bot.policy.draft_auto_ready_exclude_repos entries must be owner/repository"
-        ) from exc
+        raise ValueError("multi_bot.policy.draft_auto_ready_exclude_repos entries must be owner/repository") from exc
     for key in (
         "draft_ready_when_mature",
         "trigger_missing_ci",
