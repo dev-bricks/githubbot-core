@@ -39,8 +39,9 @@ _SHORT_SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
 
 
 def _release_lines(text: str) -> list[tuple[str, bool]]:
-    """(line, counts as release). Quoted lines and lines in code fences never release:
-    a quote-reply repeats someone else's words, a fence shows text instead of saying it."""
+    """(line, counts as release). Quoted lines, lines in code fences and indented lines never
+    release: a quote-reply repeats someone else's words, a code block shows text instead of
+    saying it. Any line indented by a tab or four spaces counts as an indented code block."""
     result, fence = [], None
     for raw in text.splitlines():
         stripped = raw.strip()
@@ -54,6 +55,9 @@ def _release_lines(text: str) -> list[tuple[str, bool]]:
             fence = marker[1]
             result.append((raw, False))
             continue
+        if raw.startswith(("\t", "    ")):  # ponytail: also hides list-nested lines; strict on purpose
+            result.append((raw, False))
+            continue
         line = re.sub(r"\s+", " ", stripped.strip("*_#").strip())
         # ">" and backticks are deliberately not stripped: a quote line never fullmatches.
         result.append((raw, bool(_RELEASE_LINE.fullmatch(line))))
@@ -62,6 +66,35 @@ def _release_lines(text: str) -> list[tuple[str, bool]]:
 
 def _is_release(text: str) -> bool:
     return any(release for _, release in _release_lines(text))
+
+
+def write_denial(kind: str, params: dict, config: dict) -> Optional[str]:
+    """Under an owner account the bot never posts a STOPP release line.
+
+    A release is the act of the stopping instance or the owner. In the owner fallback
+    (``multi_bot.owner_fallback``) or under a ``stop_release_accounts`` account the bot
+    writes as that account, so its comment with the formula would lift stops itself.
+    """
+    from .multibot import policy_settings
+
+    settings = config.get("multi_bot") or {}
+    try:
+        owners = {a.casefold() for a in policy_settings(settings.get("policy"))["stop_release_accounts"]}
+    except ValueError:
+        owners = set()  # an invalid policy already denies through switch_denial/hold_reason
+    account = str(settings.get("merge_account") or "").strip().casefold()
+    if settings.get("owner_fallback") is not True and account not in owners:
+        return None
+    body = params.get("body")
+    if kind == "api.request":
+        if not str(params.get("endpoint", "")).rstrip("/").endswith(("/comments", "/reviews")):
+            return None
+        body = body.get("body") if isinstance(body, dict) else body
+    elif kind not in ("issue.comment", "pr.review"):
+        return None
+    if isinstance(body, str) and _is_release(body):
+        return f"{kind} body contains a STOPP release line; under an owner account the bot never lifts a stop"
+    return None
 
 
 def _is_stop(text: str) -> bool:

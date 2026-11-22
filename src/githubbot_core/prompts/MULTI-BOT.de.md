@@ -140,7 +140,13 @@ Inline-Review-Kommentare und Reviews. Ein STOPP, „NICHT MERGEN“, „do not m
 oder ein Review mit Änderungswunsch ist HOLD, egal unter welchem Konto er steht. Aufheben kann
 ihn nur dasselbe Konto oder ein Konto aus `stop_release_accounts`, und zwar mit einer eigenen
 Zeile, die nur die Formel enthält: `STOPP aufgehoben`, `STOP lifted`, `Merge freigegeben` oder
-`cleared to merge`. Fragen, Verneinungen und Zusätze in dieser Zeile zählen nicht. Daneben hebt
+`cleared to merge`. Fragen, Verneinungen und Zusätze in dieser Zeile zählen nicht. Eine Freigabe
+ist ein eigener Kommentar und enthält nur die Formelzeile. Das Wort STOPP und jedes andere
+Stoppsignal kommen sonst nirgends darin vor, auch nicht in Begründung oder Rückblick: Sonst zählt
+der Kommentar selbst als neuer STOPP. Befund und Begründung gehören in einen eigenen Kommentar
+davor. Zitierte, eingerückte oder in Codeblöcken stehende Formeln heben nicht auf. Schreibst du
+unter einem Owner-Konto (Fallback oder `stop_release_accounts`), postest du keine Freigabe; der
+Core verweigert sie. Daneben hebt
 ein späteres Approve desselben Kontos auf, wenn es auf einem nachweislich neueren Head steht als
 dem im STOPP genannten. Nennt der STOPP keinen Head, gilt nur die Formel. Das Merge-Konto hebt
 nie durch Approve auf. Ist Auto-Merge auf einem gehaltenen PR scharf, nennt der HOLD das. Dann

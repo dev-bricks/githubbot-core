@@ -6,9 +6,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-22
+
+### Behoben / Fixed
+
+- STOPP-Gate: Eine Freigabeformel in einem eingerückten Codeblock (Tab oder vier Leerzeichen)
+  hebt nicht mehr auf, gleich behandelt wie Fences und Zitate / an indented code block line
+  never counts as a release.
+- STOPP-Gate: Schreibt der Bot unter einem Owner-Konto (`multi_bot.owner_fallback: true` oder
+  `merge_account` in `policy.stop_release_accounts`), verweigern `issue.comment`, `pr.review` und
+  `api.request` auf Kommentar-/Review-Endpunkte jeden Text mit Freigabezeile. So hebt der Bot im
+  Owner-Fallback keinen STOPP selbst auf / under an owner account the bot never posts a release
+  line. Labels mit Auto-Merge-Wirkung wurden geprüft: Kein Workflow der betreuten Organisationen
+  merged auf ein Label, daher keine Label-Sperre / no label-driven auto-merge workflow exists.
+
 ### Hinzugefügt / Added
 
-- STOPP-Gate für `pr.merge` und `pr.review` mit `APPROVE`: Ein STOPP-, „NICHT MERGEN“-,
+- STOPP-Gate für `pr.merge` und `pr.review` mit `APPROVE` (#18): Ein STOPP-, „NICHT MERGEN“-,
   „do not merge“- oder `REQUEST_CHANGES`-Signal in PR-Kommentaren, Inline-Review-Kommentaren
   oder Reviews hält Approve und Merge an, unabhängig vom Konto. Aufheben kann es nur eine spätere
   eigene Zeile `STOPP aufgehoben` (o. ä.) desselben Kontos oder eines Kontos aus
@@ -34,6 +48,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
   by its `multi_bot` switch. New `act` command; the run contract reports `effective_enabled`.
 - Prompt und Rollen-JSON mit festem LF (`.gitattributes`), damit der Policy-Hash nicht vom
   Checkout abhängt / prompt and role JSON pinned to LF so the policy hash is checkout-independent.
+- Ship neutral MULTI-BOT Windows/POSIX starters, German prompt and runtime helpers in wheel/sdist.
+- Export separate MULTI-BOT role descriptors using the strict existing schema; preserve system-agent unchanged.
+- Delegate optional provider launching to TASKPLAN; missing dependency fails closed with an install hint.
+- Keep roots, accounts, authentication and full-access settings in explicit private instance configuration.
 
 ### Geändert / Changed
 
@@ -76,11 +94,3 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 - Credential-Adapter (Umgebung, `gh auth token`) mit Schwärzung / credential adapter with redaction.
 - Namensraumunabhängiges Exact-SHA-Review-Gate samt Workflow-Scaffold /
   namespace-independent exact-SHA review gate with workflow scaffold.
-
-
-## Unreleased
-
-- Ship neutral MULTI-BOT Windows/POSIX starters, German prompt and runtime helpers in wheel/sdist.
-- Export separate MULTI-BOT role descriptors using the strict existing schema; preserve system-agent unchanged.
-- Delegate optional provider launching to TASKPLAN; missing dependency fails closed with an install hint.
-- Keep roots, accounts, authentication and full-access settings in explicit private instance configuration.

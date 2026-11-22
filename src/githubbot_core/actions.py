@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from . import typed_actions, write_scope
+from . import stop_gate, typed_actions, write_scope
 from .coordination import Coordinator, Hold
 
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -55,8 +55,10 @@ def denial_reason(action: Action, config: dict) -> Optional[str]:
         return f"{action.kind} is not enabled in permissions.enabled"
     if action.kind not in EXECUTORS:
         return f"{action.kind} has no executor"
-    reason = typed_actions.switch_denial(action.kind, config) or typed_actions.param_denial(
-        action.kind, action.params, config
+    reason = (
+        typed_actions.switch_denial(action.kind, config)
+        or typed_actions.param_denial(action.kind, action.params, config)
+        or stop_gate.write_denial(action.kind, action.params, config)
     )
     if reason:
         return reason
