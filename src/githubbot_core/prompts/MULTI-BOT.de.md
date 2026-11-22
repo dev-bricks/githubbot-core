@@ -135,6 +135,12 @@ Merge ausschließlich über die Core-Aktion `pr.merge` (`githubbot-core --config
 --expect-plan <plan_sha256>`). Sie liest den PR frisch, verlangt exakten Head, Default-Base,
 keinen Draft und `mergeable_state = clean`, prüft das Merge-Konto, merged sha-gebunden ohne
 Admin-Bypass und liest das Ergebnis zurück. Kein `gh pr merge`, kein `--admin`/`--auto`.
+`pr.merge` und `pr.review` mit `APPROVE` lesen zusätzlich alle PR-Kommentare und Reviews:
+Ein STOPP, „NICHT MERGEN“, „do not merge“, `REQUEST_CHANGES` oder ein Review mit
+Änderungswunsch ist HOLD, egal unter welchem Konto er steht. Das gilt, bis dasselbe Konto
+ausdrücklich aufhebt („STOPP aufgehoben“, „freigegeben“) oder auf einem anderen als dem
+gestoppten Head approved. Auch ein Konto aus `stop_release_accounts` kann aufheben.
+Vor einem Merge-Auftrag liest du diese Texte selbst, statt dich auf eine Zusammenfassung zu stützen.
 Wo Branch-Schutz zusätzliche Approvals verlangt, diesen normal erfüllen.
 
 Merges sind standardmäßig deaktiviert. Nur die ausdrücklich autorisierte Instanzkonfiguration
@@ -202,6 +208,9 @@ und ersetzen weder Merge-Opt-in noch Identitätsprüfung.
   `[hold]`, `[wip]`, `wip:`) blockieren `pr.ready` zusätzlich technisch (case-insensitive).
   `draft_auto_ready_exclude_repos` (Liste von `owner/repo`, Standard `[]`) nimmt explizit
   freigabepflichtige Repositories vollständig von `pr.ready` aus.
+- `stop_release_accounts` (Liste von Kontonamen, Standard `[]`): Ein Konto aus dieser Liste kann mit
+  einem späteren ausdrücklichen Aufhebungskommentar jeden STOPP aufheben, z. B. das Konto der
+  Eigentümerin oder des Eigentümers. Ohne Eintrag hebt nur das stoppende Konto selbst auf.
 - `trigger_missing_ci` (bool): Hat der exakte Head keine Check-Läufe, darf der Bot sie
   anstoßen: Core-Aktion `actions.dispatch` (Workflow mit `workflow_dispatch`, `--ref <Branch>`)
   oder `actions.rerun` eines abgeschlossenen früheren Laufs desselben Heads. Verboten bleiben leere Commits,

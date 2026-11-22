@@ -8,6 +8,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), [Semantic Vers
 
 ### Hinzugefügt / Added
 
+- STOPP-Gate für `pr.merge` und `pr.review` mit `APPROVE`: Ein STOPP-, „NICHT MERGEN“-,
+  „do not merge“- oder `REQUEST_CHANGES`-Signal in PR-Kommentaren oder Reviews hält Approve und
+  Merge an, unabhängig vom Konto. Aufheben kann es nur ein späterer ausdrücklicher Kommentar
+  desselben Kontos oder eines Kontos aus `policy.stop_release_accounts`, ebenso ein späteres
+  Approve desselben Kontos auf einem anderen Head. Unlesbare Kommentare oder Reviews gelten als
+  HOLD. / Stop-signal gate on approve and merge, account-independent, fail closed.
 - Opt-in-Aktion `pr.close` für nachweislich integrierte Heads: explizite Repository-Liste,
   eigenes Policy-Opt-in, exakte Head-/Default-SHAs, Kontoprüfung und unabhängiges Rücklesen.
   Keine Branch-Löschung, keine pauschalen Schließungen. / Typed opt-in closure of heads

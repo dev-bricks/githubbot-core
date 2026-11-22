@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote, urlsplit
 
+from . import stop_gate
 from .credentials import CredentialUnavailable, EnvTokenProvider, resolve_token
 
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -203,6 +204,9 @@ def exec_merge(transport, params: dict, config: dict):
     if pull.get("mergeable_state") != "clean":
         return None, f"mergeable_state is {pull.get('mergeable_state')!r}, not 'clean'"
     repo, number = params["repo"], int(params["number"])
+    stop = stop_gate.hold_reason(transport, repo, number, config)
+    if stop:
+        return None, stop
     body = {"sha": params["sha"], "merge_method": params.get("method", "merge")}
     _, error = transport.request("PUT", f"repos/{repo}/pulls/{number}/merge", body)
     if error:
@@ -352,6 +356,10 @@ def exec_review(transport, params: dict, config: dict):
             return None, "existing review record unreadable; nothing written"
         if review["user"]["login"].casefold() == account.casefold() and review["commit_id"] == sha:
             return None, f"review already exists for this account/head (id={review.get('id')}); nothing written"
+    if params["event"] == "APPROVE":
+        stop = stop_gate.hold_reason(transport, repo, number, config)
+        if stop:
+            return None, stop
     # Pagination may take time; bind the write to a fresh head again afterwards.
     _, error = current_pull()
     if error:

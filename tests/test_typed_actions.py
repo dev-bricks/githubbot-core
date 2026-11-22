@@ -67,6 +67,11 @@ class Transport:
             return None, f"404 {endpoint}"
         return (answers.pop(0) if len(answers) > 1 else answers[0]), None
 
+    def get_paginated(self, endpoint):
+        if endpoint not in self.gets and endpoint.endswith(("/comments?per_page=100", "/reviews?per_page=100")):
+            return [], None  # no stop signals unless a test provides them
+        return self.get(endpoint)
+
     def request(self, method, endpoint, body=None):
         self.writes.append((method, endpoint, body))
         return self.write_result, None
