@@ -76,7 +76,14 @@ PROBES = {
     "deleted_user": ([STOP, {**later("STOPP aufgehoben"), "user": None}], [], True),
     "review_without_submitted_at": ([], [{**review("x", "", "APPROVED"), "submitted_at": None}], True),
     "body_null": ([{**later("x"), "body": None}], [], True),
+    "non_dict_item": ([STOP, "STOPP aufgehoben"], [], True),
+    # round 2: quoted or fenced formula lines are no release
+    "quote_reply_contradiction": ([STOP, later("> Merge freigegeben\n\nNein, noch nicht.")], [], True),
+    "quote_only": ([STOP, later("> STOPP aufgehoben")], [], True),
+    "fenced_formula": ([STOP, later("```\nSTOPP aufgehoben\n```")], [], True),
+    "tilde_fenced_formula": ([STOP, later("~~~text\nSTOPP aufgehoben\n~~~")], [], True),
     # lifts
+    "release_after_closed_fence": ([STOP, later("```\nlog\n```\nSTOPP aufgehoben")], [], False),
     "release_own_line": ([STOP, later("Nachmessung grün.\nSTOPP aufgehoben")], [], False),
     "release_markdown": ([STOP, later("**STOP lifted.**")], [], False),
     "approve_on_newer_head": ([STOP], [approved(commit=NEW)], False),

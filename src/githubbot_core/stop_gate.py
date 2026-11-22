@@ -8,7 +8,8 @@ APPROVE and ``pr.merge`` until a *later* event lifts it:
 * a release line by the same account or by one of ``multi_bot.policy.stop_release_accounts``.
   The line must consist of the formula alone (``STOPP aufgehoben``, ``STOP lifted``,
   ``Merge freigegeben``, ``cleared to merge``; markdown emphasis and a final ``.``/``!``
-  are tolerated). Questions, negations or extra words on that line never count; or
+  are tolerated). Questions, negations or extra words on that line never count, nor do
+  blockquote lines (``> ...``, as a quote-reply produces) or lines inside code fences; or
 * a later APPROVED review by the same account on a head that is provably newer than
   every head the stop named (GitHub compare status ``ahead``). A stop that names no
   head can only be lifted by the release line. The configured merge account never
@@ -37,16 +38,34 @@ _RELEASE_LINE = re.compile(
 _SHORT_SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
 
 
-def _lines(text: str) -> list[str]:
-    return [re.sub(r"\s+", " ", line.strip(" \t*_>#`")) for line in text.splitlines()]
+def _release_lines(text: str) -> list[tuple[str, bool]]:
+    """(line, counts as release). Quoted lines and lines in code fences never release:
+    a quote-reply repeats someone else's words, a fence shows text instead of saying it."""
+    result, fence = [], None
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        marker = re.match(r"(`{3,}|~{3,})", stripped)
+        if fence:
+            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence):
+                fence = None
+            result.append((raw, False))
+            continue
+        if marker:
+            fence = marker[1]
+            result.append((raw, False))
+            continue
+        line = re.sub(r"\s+", " ", stripped.strip("*_#").strip())
+        # ">" and backticks are deliberately not stripped: a quote line never fullmatches.
+        result.append((raw, bool(_RELEASE_LINE.fullmatch(line))))
+    return result
 
 
 def _is_release(text: str) -> bool:
-    return any(_RELEASE_LINE.fullmatch(line) for line in _lines(text))
+    return any(release for _, release in _release_lines(text))
 
 
 def _is_stop(text: str) -> bool:
-    rest = "\n".join(line for line in _lines(text) if not _RELEASE_LINE.fullmatch(line))
+    rest = "\n".join(line for line, release in _release_lines(text) if not release)
     rest = _NEGATED.sub(" ", rest)
     return bool(_STOP.search(rest) or _STOP_UPPER.search(rest))
 
