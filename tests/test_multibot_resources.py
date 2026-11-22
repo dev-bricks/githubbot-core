@@ -237,6 +237,10 @@ def test_invalid_policy_switches_fail_closed_before_any_launch(tmp_path, capsys)
         {"unknown_key": True},
         {"draft_auto_ready_hours": 0},
         {"draft_auto_ready_hours": "24"},
+        {"draft_auto_ready_hold_labels": "hold"},
+        {"draft_auto_ready_hold_labels": [""]},
+        {"draft_auto_ready_hold_title_signals": "nicht mergen"},
+        {"draft_auto_ready_exclude_repos": ["invalid-repo"]},
         {"publish_reviews": "yes"},
         {"unknown_author": None},
     ):

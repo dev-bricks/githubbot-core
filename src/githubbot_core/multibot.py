@@ -59,12 +59,32 @@ def permission_contract(config, layers):
     return {"permissions": permissions, "config_layers": [str(Path(path).expanduser().resolve()) for path in layers]}
 
 
+DEFAULT_DRAFT_HOLD_LABELS = (
+    "do-not-merge",
+    "hold",
+    "wip",
+    "blocked",
+    "on-hold",
+    "needs-approval",
+)
+DEFAULT_DRAFT_HOLD_TITLE_SIGNALS = (
+    "nicht mergen",
+    "do not merge",
+    "don't merge",
+    "[hold]",
+    "[wip]",
+    "wip:",
+)
+
 # Public defaults stay conservative; an instance opts in per key via multi_bot.policy.
 POLICY_DEFAULTS = {
     "review_independence": "model_class",  # provider | model_class | instance
     "unknown_author": "hold",  # hold | allow
     "draft_auto_ready_hours": None,  # hours an unchanged head must age before a draft may be readied
     "draft_ready_when_mature": False,
+    "draft_auto_ready_hold_labels": list(DEFAULT_DRAFT_HOLD_LABELS),
+    "draft_auto_ready_hold_title_signals": list(DEFAULT_DRAFT_HOLD_TITLE_SIGNALS),
+    "draft_auto_ready_exclude_repos": [],
     "trigger_missing_ci": False,
     "publish_reviews": False,
     "close_integrated_prs": False,
@@ -76,6 +96,12 @@ _POLICY_CHOICES = {
 }
 
 
+def _string_list(value, key: str) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ValueError(f"multi_bot.policy.{key} must be a list of non-empty strings")
+    return [item.strip() for item in value]
+
+
 def policy_settings(raw):
     """Validate multi_bot.policy; unknown keys or wrong types fail closed instead of being ignored."""
     if raw is None:
@@ -85,13 +111,28 @@ def policy_settings(raw):
     unknown = sorted(set(raw) - set(POLICY_DEFAULTS))
     if unknown:
         raise ValueError(f"unknown multi_bot.policy keys: {unknown}")
-    policy = {**POLICY_DEFAULTS, **raw}
+    policy = {
+        key: list(default) if isinstance(default, list) else default
+        for key, default in POLICY_DEFAULTS.items()
+    }
+    policy.update(raw)
     for key, allowed in _POLICY_CHOICES.items():
         if policy[key] not in allowed:
             raise ValueError(f"multi_bot.policy.{key} must be one of {list(allowed)}")
     hours = policy["draft_auto_ready_hours"]
     if hours is not None and (type(hours) not in (int, float) or hours <= 0):
         raise ValueError("multi_bot.policy.draft_auto_ready_hours must be null or a positive number")
+    for key in ("draft_auto_ready_hold_labels", "draft_auto_ready_hold_title_signals"):
+        policy[key] = _string_list(policy[key], key)
+    from .write_scope import repository
+
+    exclude_repos = _string_list(policy["draft_auto_ready_exclude_repos"], "draft_auto_ready_exclude_repos")
+    try:
+        policy["draft_auto_ready_exclude_repos"] = [repository(repo) for repo in exclude_repos]
+    except ValueError as exc:
+        raise ValueError(
+            "multi_bot.policy.draft_auto_ready_exclude_repos entries must be owner/repository"
+        ) from exc
     for key in (
         "draft_ready_when_mature",
         "trigger_missing_ci",

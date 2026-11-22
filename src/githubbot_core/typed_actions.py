@@ -124,6 +124,10 @@ def param_denial(kind: str, params: dict, config: dict) -> Optional[str]:
         account = (config.get("multi_bot") or {}).get("merge_account")
         if not isinstance(account, str) or not account.strip():
             return "git.push_branch requires the configured multi_bot.merge_account"
+    if kind == "pr.ready":
+        excluded = draft_auto_ready_repo_excluded(params["repo"], config)
+        if excluded:
+            return excluded
     if kind == "pr.merge" and params.get("method", "merge") not in MERGE_METHODS:
         return f"method must be one of {list(MERGE_METHODS)}"
     if kind == "actions.dispatch":
@@ -233,10 +237,62 @@ READY_MUTATION = (
 )
 
 
+def _normalize_hold_label(label: str) -> str:
+    return re.sub(r"[\s_]+", "-", label.strip().casefold())
+
+
+def draft_auto_ready_repo_excluded(repo: str, config: dict) -> Optional[str]:
+    """Check whether ``repo`` is excluded from automated draft-ready transitions."""
+    try:
+        policy = _policy(config)
+    except ValueError as exc:
+        return f"multi_bot.policy invalid: {exc}"
+    excluded = {item.casefold() for item in policy.get("draft_auto_ready_exclude_repos", ())}
+    if repo.casefold() in excluded:
+        return f"pr.ready is excluded for repository {repo!r} by multi_bot.policy.draft_auto_ready_exclude_repos"
+    return None
+
+
+def draft_auto_ready_hold_reason(repo: str, pull: dict, config: dict) -> Optional[str]:
+    """Return a hold reason if a draft PR must not be auto-readied, or ``None``."""
+    excluded = draft_auto_ready_repo_excluded(repo, config)
+    if excluded:
+        return excluded
+    policy = _policy(config)
+    raw_labels = pull.get("labels")
+    if raw_labels is not None:
+        if not isinstance(raw_labels, list):
+            return "pull request labels unreadable; refusing to ready draft"
+        hold_labels = {_normalize_hold_label(item) for item in policy.get("draft_auto_ready_hold_labels", ())}
+        for item in raw_labels:
+            if isinstance(item, dict):
+                name = item.get("name")
+            elif isinstance(item, str):
+                name = item
+            else:
+                return "pull request label entry unreadable; refusing to ready draft"
+            if not isinstance(name, str) or not name.strip():
+                return "pull request label entry unreadable; refusing to ready draft"
+            if _normalize_hold_label(name) in hold_labels:
+                return f"draft pull request carries hold label {name.strip()!r}"
+    title = pull.get("title")
+    if title is not None:
+        if not isinstance(title, str):
+            return "pull request title unreadable; refusing to ready draft"
+        title_cf = title.casefold()
+        for signal in policy.get("draft_auto_ready_hold_title_signals", ()):
+            if signal.casefold() in title_cf:
+                return f"draft pull request title matches hold signal {signal!r}"
+    return None
+
+
 def exec_ready(transport, params: dict, config: dict):
     pull, error = _reviewed_pull(transport, params, draft=True)
     if error:
         return None, error
+    hold_reason = draft_auto_ready_hold_reason(params["repo"], pull, config)
+    if hold_reason:
+        return None, hold_reason
     data, error = transport.request("POST", "graphql", {"query": READY_MUTATION, "variables": {"id": pull["node_id"]}})
     if error or (data or {}).get("errors"):
         return None, error or "GraphQL error"
