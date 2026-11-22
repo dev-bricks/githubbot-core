@@ -54,6 +54,7 @@ class Transport:
         self.pull = {"number": 7, "state": "open", "head": {"sha": SHA}, "draft": False, "user": {"login": "author"}}
         self.pull_answers = []
         self.reviews = []
+        self.comments = []
         self.list_error = None
         self.write_error = None
         self.id = 81
@@ -76,6 +77,8 @@ class Transport:
         raise AssertionError(f"unexpected GET {endpoint}")
 
     def get_paginated(self, endpoint):
+        if endpoint in (f"repos/{REPO}/issues/7/comments?per_page=100", f"{ENDPOINT}/comments?per_page=100"):
+            return copy.deepcopy(self.comments), None
         assert endpoint == f"{ENDPOINT}/reviews?per_page=100"
         return copy.deepcopy(self.reviews), self.list_error
 
@@ -200,8 +203,18 @@ def test_existing_or_unreadable_reviews_prevent_a_second_write(existing):
 def test_reviews_on_old_heads_or_from_other_actors_do_not_block():
     transport = Transport()
     transport.reviews = [
-        {"user": {"login": "example-bot"}, "commit_id": OTHER},
-        {"user": {"login": "other-reviewer"}, "commit_id": SHA},
+        {
+            "user": {"login": "example-bot"},
+            "commit_id": OTHER,
+            "state": "COMMENTED",
+            "submitted_at": "2026-01-01T00:00:00Z",
+        },
+        {
+            "user": {"login": "other-reviewer"},
+            "commit_id": SHA,
+            "state": "APPROVED",
+            "submitted_at": "2026-01-01T00:01:00Z",
+        },
     ]
     assert apply(transport)["status"] == "applied"
 

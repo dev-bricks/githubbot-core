@@ -85,6 +85,7 @@ POLICY_DEFAULTS = {
     "draft_auto_ready_hold_labels": list(DEFAULT_DRAFT_HOLD_LABELS),
     "draft_auto_ready_hold_title_signals": list(DEFAULT_DRAFT_HOLD_TITLE_SIGNALS),
     "draft_auto_ready_exclude_repos": [],
+    "stop_release_accounts": [],  # accounts (besides the stopping one) whose release comment lifts any stop
     "trigger_missing_ci": False,
     "publish_reviews": False,
     "close_integrated_prs": False,
@@ -121,6 +122,10 @@ def policy_settings(raw):
         raise ValueError("multi_bot.policy.draft_auto_ready_hours must be null or a positive number")
     for key in ("draft_auto_ready_hold_labels", "draft_auto_ready_hold_title_signals"):
         policy[key] = _string_list(policy[key], key)
+    if policy["stop_release_accounts"]:
+        policy["stop_release_accounts"] = _string_list(policy["stop_release_accounts"], "stop_release_accounts")
+    elif policy["stop_release_accounts"] != []:
+        raise ValueError("multi_bot.policy.stop_release_accounts must be a list of non-empty strings")
     from .write_scope import repository
 
     exclude_repos = _string_list(policy["draft_auto_ready_exclude_repos"], "draft_auto_ready_exclude_repos")
