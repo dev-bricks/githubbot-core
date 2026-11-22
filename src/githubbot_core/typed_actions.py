@@ -204,7 +204,7 @@ def exec_merge(transport, params: dict, config: dict):
     if pull.get("mergeable_state") != "clean":
         return None, f"mergeable_state is {pull.get('mergeable_state')!r}, not 'clean'"
     repo, number = params["repo"], int(params["number"])
-    stop = stop_gate.hold_reason(transport, repo, number, config)
+    stop = stop_gate.hold_reason(transport, repo, number, config, pull)
     if stop:
         return None, stop
     body = {"sha": params["sha"], "merge_method": params.get("method", "merge")}
@@ -338,7 +338,7 @@ def exec_review(transport, params: dict, config: dict):
                 return {}, "cannot approve or request changes on the account's own pull request"
         return pull, None
 
-    _, error = current_pull()
+    pull, error = current_pull()
     if error:
         return None, error
     reviews, error = transport.get_paginated(f"{endpoint}/reviews?per_page=100")
@@ -357,7 +357,7 @@ def exec_review(transport, params: dict, config: dict):
         if review["user"]["login"].casefold() == account.casefold() and review["commit_id"] == sha:
             return None, f"review already exists for this account/head (id={review.get('id')}); nothing written"
     if params["event"] == "APPROVE":
-        stop = stop_gate.hold_reason(transport, repo, number, config)
+        stop = stop_gate.hold_reason(transport, repo, number, config, pull)
         if stop:
             return None, stop
     # Pagination may take time; bind the write to a fresh head again afterwards.

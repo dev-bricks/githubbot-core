@@ -77,7 +77,7 @@ class Transport:
         raise AssertionError(f"unexpected GET {endpoint}")
 
     def get_paginated(self, endpoint):
-        if endpoint == f"repos/{REPO}/issues/7/comments?per_page=100":
+        if endpoint in (f"repos/{REPO}/issues/7/comments?per_page=100", f"{ENDPOINT}/comments?per_page=100"):
             return copy.deepcopy(self.comments), None
         assert endpoint == f"{ENDPOINT}/reviews?per_page=100"
         return copy.deepcopy(self.reviews), self.list_error

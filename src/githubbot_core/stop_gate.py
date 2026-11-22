@@ -1,38 +1,54 @@
 """Stop-signal gate shared by every approve and merge path.
 
 A reviewing instance may stop a pull request in plain text ("STOPP", "NICHT MERGEN",
-"do not merge", ...) or with a CHANGES_REQUESTED review. Whatever account posted it,
-the stop holds ``pr.review`` APPROVE and ``pr.merge`` until a *later* event lifts it:
+"do not merge", ...) in a PR comment, an inline review comment or a review body, or with
+a CHANGES_REQUESTED review. Whatever account posted it, the stop holds ``pr.review``
+APPROVE and ``pr.merge`` until a *later* event lifts it:
 
-* an explicit release comment ("STOPP aufgehoben", "freigegeben", "stop lifted", ...)
-  by the same account or by one of ``multi_bot.policy.stop_release_accounts``, or
-* a later APPROVED review by the same account on a different head than the one the
-  stop named (reviews carry their commit; a stop comment names it as a short sha).
+* a release line by the same account or by one of ``multi_bot.policy.stop_release_accounts``.
+  The line must consist of the formula alone (``STOPP aufgehoben``, ``STOP lifted``,
+  ``Merge freigegeben``, ``cleared to merge``; markdown emphasis and a final ``.``/``!``
+  are tolerated). Questions, negations or extra words on that line never count; or
+* a later APPROVED review by the same account on a head that is provably newer than
+  every head the stop named (GitHub compare status ``ahead``). A stop that names no
+  head can only be lifted by the release line. The configured merge account never
+  lifts a stop by approving: it is the account that writes.
 
 Dismissed reviews are ignored (dismissal is GitHub's own explicit lift). Unreadable
-comments, reviews or timestamps fail closed. Anchors: lock-master#8 (2026-09-22) and
-promptboard#8 (2026-11-22), both merged minutes after a STOPP comment.
+comments, reviews or timestamps fail closed. If auto-merge is already armed on a held
+pull request, the hold reason says so, because GitHub would merge without this gate.
+Anchors: lock-master#8 (2026-09-22) and promptboard#8 (2026-11-22), both merged
+minutes after a STOPP comment.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 _NEGATED = re.compile(r"\b(?:kein(?:e[nr]?)?|no|ohne|without)\s+(?:stopp?|hold)\b", re.IGNORECASE)
 _STOP = re.compile(r"\bstopp\b|nicht\s+mergen|do[\s-]+not[\s-]+merge|don'?t\s+merge|\bREQUEST_CHANGES\b", re.IGNORECASE)
 _STOP_UPPER = re.compile(r"\bSTOP\b")  # English only in capitals, so prose like "stop the job" passes
-_RELEASE = re.compile(
-    r"\bstopp?\s+(?:ist\s+)?(?:aufgehoben|zurückgenommen|lifted|released|withdrawn)\b"
-    r"|(?<!nicht\s)(?<!not\s)(?<!kein\s)\bfreigegeben\b|\bcleared\s+to\s+merge\b",
+_RELEASE_LINE = re.compile(
+    r"(?:stopp?\s+(?:ist\s+)?(?:aufgehoben|zurückgenommen)|stop\s+(?:lifted|released|withdrawn)"
+    r"|merge\s+freigegeben|cleared\s+to\s+merge)[.!]?",
     re.IGNORECASE,
 )
 _SHORT_SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
 
 
+def _lines(text: str) -> list[str]:
+    return [re.sub(r"\s+", " ", line.strip(" \t*_>#`")) for line in text.splitlines()]
+
+
+def _is_release(text: str) -> bool:
+    return any(_RELEASE_LINE.fullmatch(line) for line in _lines(text))
+
+
 def _is_stop(text: str) -> bool:
-    text = _NEGATED.sub(" ", _RELEASE.sub(" ", text))
-    return bool(_STOP.search(text) or _STOP_UPPER.search(text))
+    rest = "\n".join(line for line in _lines(text) if not _RELEASE_LINE.fullmatch(line))
+    rest = _NEGATED.sub(" ", rest)
+    return bool(_STOP.search(rest) or _STOP_UPPER.search(rest))
 
 
 def _login(item) -> Optional[str]:
@@ -41,15 +57,31 @@ def _login(item) -> Optional[str]:
     return login.casefold() if isinstance(login, str) and login.strip() else None
 
 
-def evaluate(comments: list, reviews: list, release_accounts: Iterable[str] = ()) -> Optional[str]:
-    """Return why approve/merge must hold, or ``None``. Pure: no I/O."""
+def evaluate(
+    comments: list,
+    reviews: list,
+    release_accounts: Iterable[str] = (),
+    *,
+    merge_account: str = "",
+    is_newer: Callable[[str, str], bool] = lambda old, new: False,
+) -> Optional[str]:
+    """Return why approve/merge must hold, or ``None``. No I/O except ``is_newer``.
+
+    ``comments`` holds issue comments and inline review comments (the latter carry
+    ``original_commit_id``). ``is_newer(old, new)`` must be True only when ``new`` is a
+    proven descendant of ``old``; the default proves nothing.
+    """
     owners = {account.casefold() for account in release_accounts}
+    writer = merge_account.casefold().strip()
     events = []
+    if any(not isinstance(item, dict) for item in [*comments, *reviews]):
+        return "pull request comment or review unreadable; refusing approve/merge"
     for item in comments:
         login, at, body = _login(item), (item or {}).get("created_at"), (item or {}).get("body")
         if not login or not isinstance(at, str) or not isinstance(body, str):
             return "pull request comment unreadable; refusing approve/merge"
-        events.append((at, "comment", login, body, None))
+        commit = item.get("original_commit_id") or item.get("commit_id")
+        events.append((at, "comment", login, body, commit if isinstance(commit, str) else None))
     for item in reviews:
         login, state = _login(item), (item or {}).get("state")
         if state in ("PENDING", "DISMISSED"):
@@ -60,17 +92,20 @@ def evaluate(comments: list, reviews: list, release_accounts: Iterable[str] = ()
         events.append((at, state, login, body, commit))
     events.sort(key=lambda event: event[0])
 
-    stops: dict[str, tuple] = {}  # login -> (at, named head prefixes)
+    stops: dict[str, tuple] = {}  # login -> (at, named heads)
     for at, kind, login, body, commit in events:
-        if kind == "APPROVED":
-            stop = stops.get(login)
-            if stop and not _is_stop(body) and not any(commit.startswith(p) for p in stop[1]):
+        stop_text = _is_stop(body)
+        if kind == "APPROVED" and not stop_text:
+            named = stops.get(login, (None, set()))[1]
+            if login != writer and named and all(is_newer(head, commit) for head in named):
                 del stops[login]
-            if not _is_stop(body):
-                continue
-        if kind == "CHANGES_REQUESTED" or _is_stop(body):
-            stops[login] = (at, {commit} if commit else set(_SHORT_SHA.findall(body)))
-        elif _RELEASE.search(body):
+            continue
+        if kind == "CHANGES_REQUESTED" or stop_text:
+            named = set(_SHORT_SHA.findall(body))
+            if commit:
+                named.add(commit)
+            stops[login] = (at, named)
+        elif _is_release(body):
             if login in owners:
                 stops.clear()
             stops.pop(login, None)
@@ -80,18 +115,40 @@ def evaluate(comments: list, reviews: list, release_accounts: Iterable[str] = ()
     return f"stop signal by {login!r} at {at} is not lifted; approve/merge HOLD"
 
 
-def hold_reason(transport, repo: str, number: int, config: dict) -> Optional[str]:
+def hold_reason(transport, repo: str, number: int, config: dict, pull: Optional[dict] = None) -> Optional[str]:
     """Read all comments and reviews fresh and evaluate them; read failures are a HOLD."""
     from .multibot import policy_settings
 
+    settings = config.get("multi_bot") or {}
     try:
-        release_accounts = policy_settings((config.get("multi_bot") or {}).get("policy"))["stop_release_accounts"]
+        release_accounts = policy_settings(settings.get("policy"))["stop_release_accounts"]
     except ValueError as exc:
         return f"multi_bot.policy invalid: {exc}"
-    comments, error = transport.get_paginated(f"repos/{repo}/issues/{int(number)}/comments?per_page=100")
-    if error or not isinstance(comments, list):
-        return f"pull request comments unreadable ({error or 'no list'}); approve/merge HOLD"
-    reviews, error = transport.get_paginated(f"repos/{repo}/pulls/{int(number)}/reviews?per_page=100")
-    if error or not isinstance(reviews, list):
-        return f"pull request reviews unreadable ({error or 'no list'}); approve/merge HOLD"
-    return evaluate(comments, reviews, release_accounts)
+    lists = {}
+    for name, endpoint in (
+        ("comments", f"repos/{repo}/issues/{int(number)}/comments?per_page=100"),
+        ("inline review comments", f"repos/{repo}/pulls/{int(number)}/comments?per_page=100"),
+        ("reviews", f"repos/{repo}/pulls/{int(number)}/reviews?per_page=100"),
+    ):
+        data, error = transport.get_paginated(endpoint)
+        if error or not isinstance(data, list):
+            return f"pull request {name} unreadable ({error or 'no list'}); approve/merge HOLD"
+        lists[name] = data
+
+    def is_newer(old: str, new: str) -> bool:
+        if not _SHORT_SHA.fullmatch(old) or not _SHORT_SHA.fullmatch(new):
+            return False
+        data, error = transport.get(f"repos/{repo}/compare/{old}...{new}")
+        return not error and isinstance(data, dict) and data.get("status") == "ahead"
+
+    reason = evaluate(
+        lists["comments"] + lists["inline review comments"],
+        lists["reviews"],
+        release_accounts,
+        merge_account=str(settings.get("merge_account") or ""),
+        is_newer=is_newer,
+    )
+    if reason and isinstance(pull, dict) and pull.get("auto_merge") is not None:
+        enabler = ((pull.get("auto_merge") or {}).get("enabled_by") or {}).get("login") or "unknown"
+        reason += f"; auto-merge is armed (enabled by {enabler!r}) and GitHub may merge without this gate: disable it"
+    return reason
