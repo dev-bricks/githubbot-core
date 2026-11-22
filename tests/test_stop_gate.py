@@ -82,6 +82,9 @@ PROBES = {
     "quote_only": ([STOP, later("> STOPP aufgehoben")], [], True),
     "fenced_formula": ([STOP, later("```\nSTOPP aufgehoben\n```")], [], True),
     "tilde_fenced_formula": ([STOP, later("~~~text\nSTOPP aufgehoben\n~~~")], [], True),
+    # 0.2.2: an indented code block shows the formula instead of saying it
+    "indented_code_formula": ([STOP, later("Beispiel:\n\n    STOPP aufgehoben")], [], True),
+    "tab_indented_formula": ([STOP, later("\tMerge freigegeben")], [], True),
     # lifts
     "release_after_closed_fence": ([STOP, later("```\nlog\n```\nSTOPP aufgehoben")], [], False),
     "release_own_line": ([STOP, later("Nachmessung grün.\nSTOPP aufgehoben")], [], False),
@@ -217,6 +220,42 @@ def test_without_stop_signal_merge_and_approve_proceed():
     plain = [comment("github-actions[bot]", "2026-11-22T19:40:09Z", "Welcome! Kein STOPP-Befund, stop the job later.")]
     assert merge(Transport(plain))["receipts"][0]["status"] == "applied"
     assert approve(Transport(plain))["receipts"][0]["status"] == "applied"
+
+
+FORMULA = "Nachmessung grün.\nSTOPP aufgehoben"
+WRITES = [
+    ("issue.comment", {"repo": REPO, "number": 7, "body": FORMULA}),
+    ("pr.review", {"repo": REPO, "number": 7, "sha": SHA, "event": "COMMENT", "body": FORMULA}),
+    ("api.request", {"method": "POST", "endpoint": f"repos/{REPO}/issues/7/comments", "body": {"body": FORMULA}}),
+    ("api.request", {"method": "POST", "endpoint": f"/repos/{REPO}/pulls/7/reviews/", "body": {"body": FORMULA}}),
+]
+
+
+def fallback_config(**multi_bot):
+    layer = {
+        "permissions": {"enabled": ["issue.comment", "pr.review", "api.request"], "write_owners": ["example-org"]},
+        "multi_bot": {"merge_account": "owner-account", "policy": {"publish_reviews": True}, **multi_bot},
+    }
+    return merge_layers([("default", default_config()), ("instance", layer)])
+
+
+@pytest.mark.parametrize("kind,params", WRITES)
+def test_bot_under_owner_account_never_posts_a_release_line(kind, params):
+    for cfg in (
+        fallback_config(owner_fallback=True),
+        fallback_config(policy={"publish_reviews": True, "stop_release_accounts": ["Owner-Account"]}),
+    ):
+        assert "release line" in (stop_gate.write_denial(kind, params, cfg) or "")
+        assert "release line" in (actions.denial_reason(Action(kind, params), cfg) or "")
+
+
+def test_release_lines_stay_allowed_outside_the_owner_fallback():
+    for kind, params in WRITES:
+        assert stop_gate.write_denial(kind, params, fallback_config()) is None
+    quoted = {"repo": REPO, "number": 7, "body": "> STOPP aufgehoben\n\nNoch offen."}
+    assert stop_gate.write_denial("issue.comment", quoted, fallback_config(owner_fallback=True)) is None
+    labels = {"repo": REPO, "number": 7, "labels": ["STOPP aufgehoben"]}
+    assert stop_gate.write_denial("issue.add_labels", labels, fallback_config(owner_fallback=True)) is None
 
 
 @pytest.mark.parametrize("endpoint", [COMMENTS, INLINE, REVIEWS])

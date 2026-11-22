@@ -2,7 +2,7 @@
   "schema": "ellmos.module.v2",
   "id": "githubbot-core",
   "display_name": "githubbot-core",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "category": "tools",
   "kind": "tool",
   "status": "alpha",
