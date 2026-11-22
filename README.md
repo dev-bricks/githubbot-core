@@ -299,3 +299,16 @@ Named legacy flags `triage`, `review-merge`, and `aftercare` retain their origin
 `githubbot-core --json multi-bot-select --input SNAPSHOT.json --mode operator` makes a deterministic read-only decision from an existing snapshot. It creates no queue, work item, persistent state, or agent. The snapshot contains `candidates`, optional `processed` and `lastMaintenance`. Candidates require `id`, an exact lowercase 40-character commit `revision`, `status` (`ready`, `blocked`, `done`), `category` (`prs`, `fixes`, `policies`, `care`), and optional boolean `urgent`. Processed records carry the same identity/category, blocked/done status and a nonempty `evidence` reference; the caller verifies the actual evidence. `lastMaintenance` points via `{id, revision}` to an evidenced successful policy/care completion. Selection and repeated empty checks never advance it. Unknown values are rejected. Exact processed heads are skipped; changed PR heads can preempt fixes and maintenance. Equal-priority candidates sort by ID and SHA.
 
 The neutral ASCII Windows starter is titled MULTI-BOT COMPANION, explains foreground operation and pauses after success, failure or STOP. Only explicit `--dry-run`, `TASKPLAN_STARTER_DRY_RUN=1` or `MULTIBOT_NO_PAUSE=1` skips the pause. It installs nothing and opens no extra window.
+
+## Host-local request coordination
+
+Applied actions now use durable local inflight/unknown journals and host-local
+OS locks, including when no optional receipt file is supplied. Known rate limits
+produce persistent HOLD; no write is automatically retried. Exact review/merge
+readbacks can reconcile unknown effects; other unknown effects remain blocked.
+This covers cooperating processes sharing one local state root, not multiple
+hosts. See [transport coordination](docs/TRANSPORT_COORDINATION.md) for recovery
+limits, local-state requirements and deliberate deduplication behavior.
+
+
+Only a final HTTP 2xx response can complete a successful transport request. An isolated 1xx or 3xx response (even with CLI exit code zero) preserves the uncertainty marker and blocks subsequent requests; the core does not follow or retry redirects. GitHub CLI owns HTTP redirect handling and its `--include` output contains the final response. Definitive client rejections and rate/policy HOLDs retain their separate handling; 5xx, timeouts and ambiguous outcomes stay blocked. A 2xx transport response does not replace action-specific semantic readbacks.

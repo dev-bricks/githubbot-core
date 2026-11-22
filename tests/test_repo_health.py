@@ -73,20 +73,20 @@ class TestRepoHealthCollector(unittest.TestCase):
         def fake_run(cmd, **_kwargs):
             endpoint = cmd[-1]
             if "dependabot/alerts" in endpoint:
-                return subprocess.CompletedProcess(cmd, 0, json.dumps(alerts_payload), "")
+                return subprocess.CompletedProcess(cmd, 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps(alerts_payload), "")
             if "/issues" in endpoint:
-                return subprocess.CompletedProcess(cmd, 0, json.dumps([]), "")
+                return subprocess.CompletedProcess(cmd, 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps([]), "")
             if "code-scanning/alerts" in endpoint:
-                return subprocess.CompletedProcess(cmd, 0, json.dumps([]), "")
+                return subprocess.CompletedProcess(cmd, 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps([]), "")
             if "secret-scanning/alerts" in endpoint:
-                return subprocess.CompletedProcess(cmd, 0, json.dumps([]), "")
+                return subprocess.CompletedProcess(cmd, 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps([]), "")
             if "actions/runs" in endpoint:
-                return subprocess.CompletedProcess(cmd, 0, json.dumps(runs_payload), "")
+                return subprocess.CompletedProcess(cmd, 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps(runs_payload), "")
             if endpoint == "repos/org/repo":
                 return subprocess.CompletedProcess(
                     cmd,
                     0,
-                    json.dumps({"description": "Test repo", "topics": ["test"]}),
+                    "HTTP/2.0 200 OK\r\n\r\n" + json.dumps({"description": "Test repo", "topics": ["test"]}),
                     "",
                 )
             raise AssertionError(f"Unerwarteter Endpoint: {endpoint}")
@@ -122,13 +122,15 @@ class TestRepoHealthCollector(unittest.TestCase):
             if "dependabot/alerts" in endpoint:
                 return subprocess.CompletedProcess(cmd, 1, "", "HTTP 403")
             if "/issues" in endpoint:
-                return subprocess.CompletedProcess(cmd, 0, json.dumps([]), "")
+                return subprocess.CompletedProcess(cmd, 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps([]), "")
             if "code-scanning/alerts" in endpoint:
-                return subprocess.CompletedProcess(cmd, 0, json.dumps([]), "")
+                return subprocess.CompletedProcess(cmd, 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps([]), "")
             if "secret-scanning/alerts" in endpoint:
-                return subprocess.CompletedProcess(cmd, 0, json.dumps([]), "")
+                return subprocess.CompletedProcess(cmd, 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps([]), "")
             if "actions/runs" in endpoint:
-                return subprocess.CompletedProcess(cmd, 0, json.dumps({"workflow_runs": []}), "")
+                return subprocess.CompletedProcess(
+                    cmd, 0, "HTTP/2.0 200 OK\r\n\r\n" + json.dumps({"workflow_runs": []}), ""
+                )
             raise AssertionError(f"Unerwarteter Endpoint: {endpoint}")
 
         mock_run.side_effect = fake_run
@@ -258,8 +260,8 @@ class TestGenerateHealthReport(unittest.TestCase):
             if endpoint == "repos/org/repo":
                 return subprocess.CompletedProcess(cmd, 1, "", "API unavailable")
             if "actions/runs" in endpoint:
-                return subprocess.CompletedProcess(cmd, 0, '{"workflow_runs": []}', "")
-            return subprocess.CompletedProcess(cmd, 0, "[]", "")
+                return subprocess.CompletedProcess(cmd, 0, 'HTTP/2.0 200 OK\r\n\r\n{"workflow_runs": []}', "")
+            return subprocess.CompletedProcess(cmd, 0, "HTTP/2.0 200 OK\r\n\r\n[]", "")
 
         mock_run.side_effect = fake_run
 
@@ -267,7 +269,7 @@ class TestGenerateHealthReport(unittest.TestCase):
 
         self.assertFalse(summary.missing_description)
         self.assertFalse(summary.missing_topics)
-        self.assertTrue(any("API unavailable" in error for error in summary.errors))
+        self.assertTrue(any("GitHub request failed" in error for error in summary.errors))
 
 
 if __name__ == "__main__":

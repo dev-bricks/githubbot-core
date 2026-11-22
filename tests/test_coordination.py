@@ -1,0 +1,1033 @@
+"""Offline transport, crash and cooperating-process guarantees."""
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+from githubbot_core import coordination
+from githubbot_core.coordination import Coordinator, Hold
+from githubbot_core.transport import GhCliTransport
+
+
+def reply(status=200, headers="", body='{"ok": true}', error=""):
+    return SimpleNamespace(
+        returncode=int(status >= 400), stdout=f"HTTP/2.0 {status} Synthetic\r\n{headers}\r\n{body}", stderr=error
+    )
+
+
+@pytest.mark.parametrize(
+    "status,headers,error,policy",
+    [
+        (429, "Retry-After: 120\r\n", "", False),
+        (403, "X-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: 1300\r\n", "", False),
+        (403, "", "secondary rate limit", False),
+        (403, "", "Forbidden", True),
+        (429, "Retry-After: invalid\r\n", "", True),
+    ],
+)
+def test_shared_rate_hold_stops_next_process_transport(tmp_path, status, headers, error, policy):
+    c = Coordinator(tmp_path / "rate", clock=lambda: 1000)
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply(status, headers, error=error)
+
+    t = GhCliTransport(runner=run, coordinator=c)
+    assert t.get("user")[1]
+    other = GhCliTransport(runner=run, coordinator=Coordinator(c.root, clock=lambda: 1001))
+    assert other.get("user")[1] == "GitHub coordination HOLD; no request sent"
+    assert len(calls) == 1
+    assert bool(c.load("github-com-rate").get("policy_hold")) == policy
+
+
+def test_cooldown_expiry_and_no_automatic_retry(tmp_path):
+    now = [1000]
+    c = Coordinator(tmp_path / "rate", clock=lambda: now[0])
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply(429, "Retry-After: 60\r\n") if len(calls) == 1 else reply()
+
+    t = GhCliTransport(runner=run, coordinator=c)
+    assert t.get("user")[1] and len(calls) == 1
+    now[0] = 1059
+    assert t.get("user")[1] and len(calls) == 1
+    now[0] = 1060
+    assert t.get("user") == ({"ok": True}, None)
+    assert len(calls) == 2
+
+
+def test_mutation_spacing_and_body_is_not_rate_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr(coordination, "MUTATION_INTERVAL", 1.0)
+    c = Coordinator(tmp_path / "rate", clock=lambda: 1000)
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply(body='{"body":"rate limit 429 Retry-After: 99999"}')
+
+    t = GhCliTransport(runner=run, coordinator=c)
+    assert t.request("POST", "repos/example-org/r/issues/1/comments", {"body": "synthetic"})[1] is None
+    assert t.request("POST", "repos/example-org/r/issues/2/comments", {"body": "synthetic"})[1]
+    assert len(calls) == 1
+    assert t.get("user")[1] is None
+
+
+def test_invalid_state_and_backwards_clock_fail_closed(tmp_path):
+    c = Coordinator(tmp_path / "state", clock=lambda: 1000)
+    with c.lock("test"):
+        c.check_rate()
+        c.clock = lambda: 999
+        with pytest.raises(Hold):
+            c.check_rate()
+        (c.root / "github-com-rate.json").write_text("{}")
+        with pytest.raises(Hold):
+            c.check_rate()
+
+
+WORKER = r"""
+import json,os,sys,time
+from pathlib import Path
+from githubbot_core import actions
+from githubbot_core.coordination import Coordinator
+from githubbot_core.transport import GhCliTransport
+from types import SimpleNamespace
+root, mode = Path(sys.argv[1]),sys.argv[2]
+c=Coordinator(root)
+if mode in {'request','barrier','request-crash'}:
+ def runner(*args,**kw):
+  with (root/'trace').open('a') as f:f.write(json.dumps(['start',time.time()])+'\n')
+  if mode=='request-crash':os._exit(24)
+  if mode=='barrier':
+   deadline=time.monotonic()+20
+   while not (root/'release').exists():
+    assert time.monotonic()<deadline
+    time.sleep(.01)
+  else:time.sleep(.2)
+  with (root/'trace').open('a') as f:f.write(json.dumps(['end',time.time()])+'\n')
+  return SimpleNamespace(returncode=0,stdout='HTTP/2.0 200 OK\n\n{}',stderr='')
+ assert GhCliTransport(runner=runner,coordinator=c).get('user')[1] is None
+else:
+ class T:
+  coordinator=c
+  def get(self,e):
+   return ({'login':'example-bot'} if e=='user' else {'full_name':'example-org/repo'}),None
+  def request(self,*args):
+   with (root/'effects').open('a') as f:f.write('effect\n');f.flush();os.fsync(f.fileno())
+   if mode=='crash':os._exit(23)
+   time.sleep(.1)
+   return {'ok':True},None
+ cfg={'permissions':{'ceiling':['issue.comment'],'enabled':['issue.comment'],'write_owners':['example-org']},'multi_bot':{'merge_account':'example-bot'}}
+ result=actions.apply([actions.Action('issue.comment',{'repo':'example-org/repo','number':1,'body':'synthetic'})],T(),cfg)
+ print(json.dumps(result))
+"""
+
+
+def spawn(root, mode):
+    return subprocess.Popen(
+        [sys.executable, "-B", "-X", "utf8", "-c", WORKER, str(root), mode],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
+    )
+
+
+def finish(child, expected=0):
+    out, err = child.communicate(timeout=20)
+    assert child.returncode == expected, err
+    return out
+
+
+def test_two_processes_have_no_overlapping_transport_requests(tmp_path):
+    root = tmp_path / "process"
+    a, b = spawn(root, "request"), spawn(root, "request")
+    finish(a)
+    finish(b)
+    trace = [json.loads(x) for x in (root / "trace").read_text().splitlines()]
+    assert [x[0] for x in trace] == ["start", "end", "start", "end"]
+    assert trace[2][1] >= trace[1][1]
+
+
+def test_two_processes_apply_identical_action_once(tmp_path):
+    root = tmp_path / "process"
+    a, b = spawn(root, "action"), spawn(root, "action")
+    results = [json.loads(finish(x))["receipts"][0]["status"] for x in [a, b]]
+    assert sorted(results) == ["applied", "skipped_duplicate"]
+    assert (root / "effects").read_text().splitlines() == ["effect"]
+
+
+def test_crash_after_effect_preserves_unknown_and_releases_os_lock(tmp_path):
+    root = tmp_path / "crash"
+    finish(spawn(root, "crash"), 23)
+    result = json.loads(finish(spawn(root, "action")))
+    assert result["receipts"][0]["status"] == "failed"
+    assert "unknown write HOLD" in result["receipts"][0]["detail"]
+    assert (root / "effects").read_text().splitlines() == ["effect"]
+    journal = list(root.glob("action-*.json"))
+    assert len(journal) == 1 and json.loads(journal[0].read_text())["status"] == "inflight"
+
+
+@pytest.mark.parametrize("change", ["body", "head", "actor", "duplicate", "number", "malformed"])
+def test_unknown_review_needs_unique_exact_readback(change):
+    from test_pr_review_action import Transport, action, config, SHA
+    from githubbot_core import actions
+
+    t = Transport()
+    t.write_error = "Timeout"
+    a = action()
+    assert actions.apply([a], t, config())["receipts"][0]["status"] == "failed"
+    if change == "body":
+        t.reviews[0]["body"] = "different"
+    elif change == "head":
+        t.pull["head"]["sha"] = "b" * 40
+    elif change == "actor":
+        t.reviews[0]["user"]["login"] = "other-actor"
+    elif change == "number":
+        t.pull["number"] = 99
+    elif change == "malformed":
+        t.reviews.append({"user": "not-an-object"})
+    else:
+        t.reviews.append(dict(t.reviews[0]))
+    result = actions.apply([a], t, config())
+    assert result["receipts"][0]["status"] == "failed"
+    assert len(t.writes) == 1
+    assert SHA != "b" * 40
+
+
+def test_unknown_plan_authority_change_cannot_reuse_intent():
+    from test_pr_review_action import Transport, action, config
+    from githubbot_core import actions
+
+    t = Transport()
+    t.write_error = "Timeout"
+    a = action()
+    actions.apply([a], t, config())
+    cfg = config()
+    cfg["permissions"]["write_owners"] += ["another-org"]
+    result = actions.apply([a], t, cfg)
+    assert result["receipts"][0]["status"] == "failed"
+    assert len(t.writes) == 1
+
+
+def test_pre_send_hold_does_not_invent_unknown_effect(tmp_path, monkeypatch):
+    from githubbot_core import actions
+
+    monkeypatch.setattr(coordination, "MUTATION_INTERVAL", 1.0)
+    now = [1000.0]
+    c = Coordinator(tmp_path / "before", clock=lambda: now[0])
+    calls = []
+
+    def run(command, **kw):
+        calls.append(command)
+        if "--method" in command:
+            return reply()
+        return reply(
+            body=json.dumps({"login": "example-bot"} if command[-1] == "user" else {"full_name": "example-org/repo"})
+        )
+
+    t = GhCliTransport(runner=run, coordinator=c)
+    cfg = {
+        "permissions": {"ceiling": ["issue.comment"], "enabled": ["issue.comment"], "write_owners": ["example-org"]},
+        "multi_bot": {"merge_account": "example-bot"},
+    }
+    a = actions.Action("issue.comment", {"repo": "example-org/repo", "number": 1, "body": "synthetic"})
+    with c.lock("github-com-transport"):
+        c.check_rate(mutation=True)
+    result = actions.apply([a], t, cfg)
+    assert result["receipts"][0]["status"] == "failed" and result["writes"] == 0
+    assert not list(c.root.glob("action-*.json"))
+    assert not any("--method" in x for x in calls)
+    now[0] += 1
+    assert actions.apply([a], t, cfg)["receipts"][0]["status"] == "applied"
+
+
+def test_pagination_holds_without_returning_partial_results(tmp_path):
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            return reply(
+                headers='Link: <https://api.github.com/repos/example-org/repo/issues?page=2>; rel="next"\r\n',
+                body='[{"number":1}]',
+            )
+        return reply(429, "Retry-After: 60\r\n")
+
+    t = GhCliTransport(runner=run, coordinator=Coordinator(tmp_path / "pages", clock=lambda: 1000))
+    data, error = t.get_paginated("repos/example-org/repo/issues")
+    assert data == [] and error and len(calls) == 2
+
+
+def test_lock_timeout_never_unlinks_guard(tmp_path):
+    root = tmp_path / "busy"
+    child = spawn(root, "barrier")
+    try:
+        deadline = __import__("time").monotonic() + 10
+        while not (root / "trace").exists():
+            assert __import__("time").monotonic() < deadline
+            __import__("time").sleep(0.01)
+        c = Coordinator(root, timeout=0.01)
+        with pytest.raises(Hold):
+            with c.lock("github-com-transport"):
+                pytest.fail("must not acquire")
+    finally:
+        (root / "release").write_text("release", encoding="utf-8")
+        finish(child)
+    assert (root / "github-com-transport.lock").exists()
+
+
+@pytest.mark.parametrize(
+    "diagnostic", ["gh: HTTP 403: Forbidden", "gh: Forbidden (HTTP 403)", "gh: Too many requests (HTTP 429)"]
+)
+def test_cli_status_without_headers_still_persists_hold(tmp_path, diagnostic):
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return SimpleNamespace(returncode=1, stdout="", stderr=diagnostic)
+
+    t = GhCliTransport(runner=run, coordinator=Coordinator(tmp_path / "cli", clock=lambda: 1000))
+    assert t.get("user")[1]
+    assert t.get("user")[1] == "GitHub coordination HOLD; no request sent"
+    assert len(calls) == 1
+
+
+def test_successful_response_with_exhausted_primary_budget_preserves_result_then_holds(tmp_path):
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply(200, "X-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: 1300\r\n")
+
+    t = GhCliTransport(runner=run, coordinator=Coordinator(tmp_path / "exhausted", clock=lambda: 1000))
+    assert t.get("user") == ({"ok": True}, None)
+    assert t.get("user")[1] and len(calls) == 1
+
+
+def test_fixed_merge_readback_query_is_not_a_second_mutation(tmp_path, monkeypatch):
+    from githubbot_core.typed_actions import MERGE_READBACK_QUERY
+
+    monkeypatch.setattr(coordination, "MUTATION_INTERVAL", 1.0)
+    c = Coordinator(tmp_path / "readback", clock=lambda: 1000)
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply()
+
+    t = GhCliTransport(runner=run, coordinator=c)
+    assert t.request("PUT", "repos/example-org/repo/pulls/1/merge", {"sha": "a" * 40})[1] is None
+    assert t.request("POST", "graphql", {"query": MERGE_READBACK_QUERY, "variables": {"id": "synthetic"}})[1] is None
+    assert t.request("POST", "graphql", {"query": "mutation { synthetic }"})[1]
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "change,expected", [(None, "skipped_confirmed"), ("head", "failed"), ("number", "failed"), ("commit", "failed")]
+)
+def test_unknown_merge_reconciles_only_exact_published_state(change, expected):
+    from test_typed_actions import Transport, base_gets, config, REPO, SHA
+    from githubbot_core.actions import Action, apply
+
+    class T(Transport):
+        def request(self, *args, **kw):
+            super().request(*args, **kw)
+            return None, "Timeout"
+
+    gets = base_gets()
+    for pull in gets[f"repos/{REPO}/pulls/7"]:
+        pull["number"] = 7
+    t = T(gets)
+    a = Action("pr.merge", {"repo": REPO, "number": 7, "sha": SHA})
+    assert apply([a], t, config())["receipts"][0]["status"] == "failed"
+    target = t.gets[f"repos/{REPO}/pulls/7"][-1]
+    if change == "head":
+        target["head"] = {"sha": "c" * 40}
+    if change == "number":
+        target["number"] = 99
+    if change == "commit":
+        target["merge_commit_sha"] = "invalid"
+    assert apply([a], t, config())["receipts"][0]["status"] == expected
+    assert len(t.writes) == 1
+
+
+def _interleave_identity_read(monkeypatch, transport, operation):
+    """Pause after page body extraction, outside the transport lock."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from githubbot_core import transport as transport_module
+
+    original = transport_module.parse_concatenated_json
+    page_ready, other_finished = threading.Event(), threading.Event()
+    paused = []
+
+    def parse(text):
+        if not paused:
+            paused.append(True)
+            page_ready.set()
+            assert other_finished.wait(5), "parallel identity read did not finish"
+        return original(text)
+
+    monkeypatch.setattr(transport_module, "parse_concatenated_json", parse)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(operation)
+        try:
+            assert page_ready.wait(5), "paging did not reach the deterministic boundary"
+            assert transport.get("user") == ({"login": "example-bot"}, None)
+        finally:
+            other_finished.set()
+        return future.result(timeout=10)
+
+
+def test_paginated_headers_are_bound_to_the_response_during_parallel_read(tmp_path, monkeypatch):
+    calls = []
+
+    def run(command, **kw):
+        endpoint = command[-1]
+        calls.append(endpoint)
+        if endpoint == "user":
+            return reply(body='{"login":"example-bot"}')
+        if "page=2" in endpoint:
+            return reply(body='[{"number":2}]')
+        return reply(
+            headers='Link: <https://api.github.com/repos/example-org/repo/issues?page=2>; rel="next"\r\n',
+            body='[{"number":1}]',
+        )
+
+    t = GhCliTransport(runner=run, coordinator=Coordinator(tmp_path / "thread-pages"))
+    result = _interleave_identity_read(monkeypatch, t, lambda: t.get_paginated("repos/example-org/repo/issues"))
+    assert result == ([{"number": 1}, {"number": 2}], None)
+    assert len(calls) == 3
+    assert not hasattr(t, "response_headers")
+
+
+def test_parallel_read_cannot_hide_existing_review_on_second_page(tmp_path, monkeypatch):
+    from test_pr_review_action import action, config, SHA, REPO
+    from githubbot_core.actions import apply
+
+    a = action()
+    calls = []
+
+    def run(command, **kw):
+        endpoint = command[-1]
+        calls.append(command)
+        if "--method" in command:
+            pytest.fail("existing second-page review must prohibit a duplicate POST")
+        if endpoint == "user":
+            return reply(body='{"login":"example-bot"}')
+        if endpoint == f"repos/{REPO}":
+            return reply(body=json.dumps({"full_name": REPO, "default_branch": "main"}))
+        if "reviews?page=2" in endpoint:
+            return reply(
+                body=json.dumps(
+                    [
+                        {
+                            "id": 81,
+                            "user": {"login": "example-bot"},
+                            "commit_id": SHA,
+                            "body": a.params["body"],
+                            "state": "APPROVED",
+                        }
+                    ]
+                )
+            )
+        if "/reviews?" in endpoint:
+            return reply(
+                headers=f'Link: <https://api.github.com/repos/{REPO}/pulls/7/reviews?page=2>; rel="next"\r\n', body="[]"
+            )
+        return reply(
+            body=json.dumps(
+                {
+                    "number": 7,
+                    "head": {"sha": SHA},
+                    "state": "open",
+                    "draft": False,
+                    "user": {"login": "another-author"},
+                }
+            )
+        )
+
+    t = GhCliTransport(runner=run, coordinator=Coordinator(tmp_path / "thread-review"))
+    result = _interleave_identity_read(monkeypatch, t, lambda: apply([a], t, config()))
+    assert result["receipts"][0]["status"] == "failed"
+    assert "already exists" in result["receipts"][0]["detail"]
+    assert result["writes"] == 0
+    assert not any("--method" in c for c in calls)
+
+
+def test_response_header_snapshot_is_immutable(tmp_path):
+    t = GhCliTransport(
+        runner=lambda *a, **kw: reply(headers="X-RateLimit-Remaining: 10\r\n"),
+        coordinator=Coordinator(tmp_path / "immutable"),
+    )
+    response = t._invoke_response(["user"])
+    with pytest.raises(TypeError):
+        response.headers["link"] = "replacement"
+    assert response.body == '{"ok": true}' and response.error is None
+
+
+def test_same_process_threads_cannot_overlap_via_canonical_lock_path(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    c = Coordinator(tmp_path / "same-thread", timeout=0.05)
+    alias = Coordinator(c.root / ".." / c.root.name, timeout=0.05)
+
+    def contender():
+        with alias.lock("same"):
+            return "incorrectly-acquired"
+
+    with c.lock("same"):
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(contender)
+            with pytest.raises(Hold, match="coordination busy; no request sent"):
+                future.result(timeout=5)
+    with alias.lock("same"):
+        pass
+
+
+def test_threads_and_external_process_cannot_enter_same_transport_lock(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    import time
+
+    root = tmp_path / "mixed"
+    child = spawn(root, "barrier")
+    try:
+        deadline = time.monotonic() + 10
+        while not (root / "trace").exists():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+
+        def contend():
+            with Coordinator(root, timeout=0.1).lock("github-com-transport"):
+                return "incorrectly-acquired"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(contend) for _ in range(2)]
+            for future in futures:
+                with pytest.raises(Hold, match="coordination busy; no request sent"):
+                    future.result(timeout=5)
+    finally:
+        (root / "release").write_text("release", encoding="utf-8")
+        finish(child)
+    with Coordinator(root).lock("github-com-transport"):
+        pass
+
+
+def test_concurrent_apply_threads_never_duplicate_unknown_or_successful_effect(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from githubbot_core.actions import Action, apply
+
+    entered, release = threading.Event(), threading.Event()
+    writes = []
+    root = tmp_path / "thread-actions"
+
+    class T:
+        def __init__(self):
+            self.coordinator = Coordinator(root, timeout=0.1)
+
+        def get(self, e):
+            return ({"login": "example-bot"} if e == "user" else {"full_name": "example-org/repo"}), None
+
+        def request(self, *args):
+            writes.append(args)
+            entered.set()
+            assert release.wait(5)
+            return {"ok": True}, None
+
+    cfg = {
+        "permissions": {"ceiling": ["issue.comment"], "enabled": ["issue.comment"], "write_owners": ["example-org"]},
+        "multi_bot": {"merge_account": "example-bot"},
+    }
+    a = Action("issue.comment", {"repo": "example-org/repo", "number": 1, "body": "synthetic"})
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(apply, [a], T(), cfg)
+        try:
+            assert entered.wait(5)
+            second = apply([a], T(), cfg)
+            assert second["receipts"][0]["status"] == "failed"
+            assert len(writes) == 1
+        finally:
+            release.set()
+        assert first.result(timeout=5)["receipts"][0]["status"] == "applied"
+    assert apply([a], T(), cfg)["receipts"][0]["status"] == "skipped_duplicate"
+    assert len(writes) == 1
+
+
+@pytest.mark.parametrize("rate_response", ["policy", "cooldown"])
+def test_action_preflight_cannot_overwrite_concurrent_transport_hold(tmp_path, rate_response):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    from githubbot_core.actions import Action
+
+    stale_snapshot, allow_save, policy_waiting = threading.Event(), threading.Event(), threading.Event()
+    root = tmp_path / "rate-transaction"
+
+    class ActionCoordinator(Coordinator):
+        paused = False
+
+        def save(self, name, value):
+            if name == "github-com-rate" and not self.paused:
+                self.paused = True
+                stale_snapshot.set()
+                assert allow_save.wait(5)
+            return super().save(name, value)
+
+    class PolicyCoordinator(Coordinator):
+        @contextmanager
+        def lock(self, name):
+            if name == "github-com-rate-state":
+                policy_waiting.set()
+            with super().lock(name):
+                yield
+
+    action_coordinator = ActionCoordinator(root)
+    policy_coordinator = PolicyCoordinator(root)
+    commands = []
+
+    def run(command, **kw):
+        commands.append(command)
+        endpoint = command[-1]
+        if endpoint == "synthetic-policy":
+            return reply(403) if rate_response == "policy" else reply(429, "Retry-After: 120\r\n")
+        if "--method" in command:
+            pytest.fail("concurrent HOLD must prohibit the POST")
+        return reply(
+            body=json.dumps({"login": "example-bot"} if endpoint == "user" else {"full_name": "example-org/repo"})
+        )
+
+    # Outer action authority reads use another coordinator, so the controlled
+    # stale snapshot belongs exactly to _coordinated_action's preflight.
+    t = GhCliTransport(runner=run, coordinator=Coordinator(root))
+    a = Action("issue.comment", {"repo": "example-org/repo", "number": 1, "body": "synthetic"})
+    cfg = {
+        "permissions": {"ceiling": ["issue.comment"], "enabled": ["issue.comment"], "write_owners": ["example-org"]},
+        "multi_bot": {"merge_account": "example-bot"},
+    }
+    from githubbot_core.actions import _coordinated_action, plan_digest
+
+    class ActionTransport:
+        coordinator = action_coordinator
+
+        def get(self, e):
+            return t.get(e)
+
+        def request_with_intent(self, *args, **kw):
+            return t.request_with_intent(*args, **kw)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        action = pool.submit(_coordinated_action, a, ActionTransport(), cfg, plan_digest([a], cfg))
+        try:
+            assert stale_snapshot.wait(5)
+            policy = pool.submit(GhCliTransport(runner=run, coordinator=policy_coordinator).get, "synthetic-policy")
+            assert policy_waiting.wait(5), "request/HOLD transactions must acquire the same state lock"
+        finally:
+            allow_save.set()
+        assert policy.result(timeout=10)[1]
+        result = action.result(timeout=10)
+    assert result["status"] in {"denied", "failed"}
+    state = Coordinator(root).load("github-com-rate")
+    if rate_response == "policy":
+        assert state["policy_hold"] is True
+    else:
+        assert state["not_before"] > __import__("time").time()
+    assert not any("--method" in command for command in commands)
+    assert not list(root.glob("action-*.json"))
+
+
+def test_rate_state_lock_failure_after_request_does_not_claim_nothing_sent(tmp_path):
+    class StateFailure(Coordinator):
+        def rate_hold(self, **kw):
+            raise Hold("synthetic state lock timeout")
+
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply(429, "Retry-After: 60\r\n")
+
+    t = GhCliTransport(runner=run, coordinator=StateFailure(tmp_path / "post-request"))
+    data, error = t.request("POST", "repos/example-org/repo/issues/1/comments", {"body": "synthetic"})
+    assert data is None and len(calls) == 1
+    assert "outcome unconfirmed" in error and "no request sent" not in error
+
+
+FRESH_REQUEST_CHECK = r"""
+import sys,json
+from pathlib import Path
+from githubbot_core.coordination import Coordinator
+from githubbot_core.transport import GhCliTransport
+root=Path(sys.argv[1])
+calls=[]
+def runner(*a,**kw):
+ calls.append(1)
+ raise AssertionError('ordinary request must remain blocked')
+result=GhCliTransport(runner=runner,coordinator=Coordinator(root,timeout=.2)).get('user')
+assert result[1] and not calls
+print(json.dumps({'requests':len(calls),'error':result[1]}))
+"""
+
+
+def fresh_request_is_blocked(root):
+    child = subprocess.Popen(
+        [sys.executable, "-B", "-X", "utf8", "-c", FRESH_REQUEST_CHECK, str(root)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
+    )
+    return json.loads(finish(child))
+
+
+def test_real_state_lock_failure_after_403_blocks_fresh_process(tmp_path):
+    import time
+
+    root = tmp_path / "persist-failed"
+    contender = []
+    script = r"""
+import sys,time
+from pathlib import Path
+from githubbot_core.coordination import Coordinator
+root=Path(sys.argv[1])
+with Coordinator(root).lock('github-com-rate-state'):
+ (root/'lock-ready').write_text('ready')
+ deadline=time.monotonic()+20
+ while not (root/'unlock').exists():
+  assert time.monotonic()<deadline
+  time.sleep(.01)
+"""
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        child = subprocess.Popen(
+            [sys.executable, "-B", "-X", "utf8", "-c", script, str(root)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")},
+        )
+        contender.append(child)
+        deadline = time.monotonic() + 10
+        while not (root / "lock-ready").exists():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        return reply(403)
+
+    try:
+        data, error = GhCliTransport(runner=run, coordinator=Coordinator(root, timeout=0.05)).get("user")
+        assert data is None and "outcome unconfirmed" in error and len(calls) == 1
+        assert (root / "github-com-request.json").exists()
+    finally:
+        (root / "unlock").write_text("unlock")
+        for child in contender:
+            finish(child)
+    assert fresh_request_is_blocked(root)["requests"] == 0
+    assert (root / "github-com-request.json").exists()
+
+
+def test_timeout_and_restart_keep_request_marker_without_retry(tmp_path):
+    root = tmp_path / "timeout-marker"
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        raise subprocess.TimeoutExpired("synthetic-gh", 1)
+
+    result = GhCliTransport(runner=run, coordinator=Coordinator(root)).get("user")
+    assert result[1] and len(calls) == 1
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+def test_marker_must_be_durable_before_request(tmp_path):
+    class NoMarker(Coordinator):
+        def save(self, name, value):
+            if name == "github-com-request":
+                raise PermissionError("synthetic disk failure")
+            return super().save(name, value)
+
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply()
+
+    result = GhCliTransport(runner=run, coordinator=NoMarker(tmp_path / "cannot-mark")).get("user")
+    assert result[1] == "GitHub coordination HOLD; no request sent" and not calls
+
+
+def test_explicit_recovery_only_promotes_exact_marker_to_policy_hold(tmp_path):
+    c = Coordinator(tmp_path / "recovery")
+    with c.lock("github-com-transport"):
+        request_id = c.begin_request()
+    with pytest.raises(Hold):
+        c.settle_request_as_policy_hold("0" * 32)
+    assert c.load("github-com-request")["id"] == request_id
+    c.settle_request_as_policy_hold(request_id)
+    assert not (c.root / "github-com-request.json").exists()
+    assert c.load("github-com-rate")["policy_hold"] is True
+    assert fresh_request_is_blocked(c.root)["requests"] == 0
+
+
+def test_failed_recovery_preserves_marker_when_policy_cannot_be_saved(tmp_path):
+    root = tmp_path / "recovery-denied"
+    c = Coordinator(root)
+    with c.lock("github-com-transport"):
+        request_id = c.begin_request()
+
+    class NoState(Coordinator):
+        def save(self, name, value):
+            if name == "github-com-rate":
+                raise PermissionError("synthetic disk failure")
+            return super().save(name, value)
+
+    with pytest.raises(OSError):
+        NoState(root).settle_request_as_policy_hold(request_id)
+    assert c.load("github-com-request")["id"] == request_id
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+def test_transport_process_death_leaves_uncertainty_for_next_process(tmp_path):
+    root = tmp_path / "dead-transport"
+    finish(spawn(root, "request-crash"), 24)
+    assert (root / "github-com-request.json").exists()
+    assert [json.loads(x)[0] for x in (root / "trace").read_text().splitlines()] == ["start"]
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+def test_successful_response_with_failed_marker_cleanup_remains_blocked(tmp_path):
+    class CannotFinish(Coordinator):
+        def finish_request(self, request_id):
+            raise PermissionError("synthetic cleanup failure")
+
+    root = tmp_path / "cleanup"
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply()
+
+    data, error = GhCliTransport(runner=run, coordinator=CannotFinish(root)).get("user")
+    assert data is None and "outcome unconfirmed" in error and len(calls) == 1
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+def test_offline_recovery_of_marker_with_missing_rate_state_still_denies_network(tmp_path):
+    c = Coordinator(tmp_path / "missing-rate")
+    with c.lock("github-com-transport"):
+        request_id = c.begin_request()
+    (c.root / "github-com-rate.json").unlink()
+    c.settle_request_as_policy_hold(request_id)
+    state = c.load("github-com-rate")
+    assert state["schema"] == "githubbot-core.rate/v1" and state["policy_hold"] is True
+    assert fresh_request_is_blocked(c.root)["requests"] == 0
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504, 408, 499])
+def test_ambiguous_http_write_response_keeps_marker_and_blocks_fresh_process(tmp_path, status):
+    root = tmp_path / str(status)
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        assert (root / "github-com-request.json").exists()
+        return reply(status)
+
+    data, error = GhCliTransport(runner=run, coordinator=Coordinator(root)).request(
+        "POST", "repos/example-org/repo/issues/1/comments", {"body": "synthetic"}
+    )
+    assert data is None and "outcome unconfirmed" in error and len(calls) == 1
+    assert (root / "github-com-request.json").exists()
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+@pytest.mark.parametrize("status", [400, 401, 404, 409, 422])
+def test_known_client_rejection_clears_only_transport_uncertainty(tmp_path, status):
+    root = tmp_path / str(status)
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        return reply(status) if len(calls) == 1 else reply()
+
+    t = GhCliTransport(runner=run, coordinator=Coordinator(root))
+    data, error = t.request("POST", "repos/example-org/repo/issues/1/comments", {"body": "synthetic"})
+    assert data is None and "refused" in error and len(calls) == 1
+    assert not (root / "github-com-request.json").exists()
+    assert t.get("user") == ({"ok": True}, None) and len(calls) == 2
+
+
+def test_confirmed_client_rejection_does_not_authorize_action_repetition(tmp_path):
+    from githubbot_core.actions import Action, apply
+
+    root = tmp_path / "client-action"
+    calls = []
+
+    def run(command, **kw):
+        calls.append(command)
+        if "--method" in command:
+            return reply(422)
+        return reply(
+            body=json.dumps({"login": "example-bot"} if command[-1] == "user" else {"full_name": "example-org/repo"})
+        )
+
+    t = GhCliTransport(runner=run, coordinator=Coordinator(root))
+    cfg = {
+        "permissions": {"ceiling": ["issue.comment"], "enabled": ["issue.comment"], "write_owners": ["example-org"]},
+        "multi_bot": {"merge_account": "example-bot"},
+    }
+    a = Action("issue.comment", {"repo": "example-org/repo", "number": 1, "body": "synthetic"})
+    assert apply([a], t, cfg)["receipts"][0]["status"] == "failed"
+    assert not (root / "github-com-request.json").exists()
+    assert len([cmd for cmd in calls if "--method" in cmd]) == 1
+    result = json.loads(finish(spawn(root, "action")))
+    assert result["receipts"][0]["status"] == "failed"
+    assert "unknown write HOLD" in result["receipts"][0]["detail"]
+    assert not (root / "effects").exists()
+
+
+@pytest.mark.parametrize("status", [100, 101, 199, 300, 301, 302, 303, 304, 307, 308, 399])
+def test_nonfinal_http_status_never_resolves_request_or_allows_fresh_process(tmp_path, status):
+    root = tmp_path / str(status)
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        assert (root / "github-com-request.json").exists()
+        # Original reported shape: successful process, empty HTTP/1.1 302 body.
+        return SimpleNamespace(returncode=0, stdout=f"HTTP/1.1 {status} Synthetic\r\n\r\n", stderr="")
+
+    data, error = GhCliTransport(runner=run, coordinator=Coordinator(root)).request(
+        "POST", "repos/example-org/repo/issues/1/comments", {"body": "synthetic"}
+    )
+    assert data is None and error and "outcome unconfirmed" in error
+    assert len(calls) == 1 and (root / "github-com-request.json").exists()
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+@pytest.mark.parametrize("status,body", [(200, '{"id": 1}'), (201, '{"id": 2}'), (202, "{}"), (204, "")])
+def test_final_2xx_response_can_finish_transport_request(tmp_path, status, body):
+    root = tmp_path / str(status)
+    calls = []
+
+    def run(*args, **kw):
+        calls.append(1)
+        # gh --include prints the final response after its HTTP client follows redirects.
+        return reply(status, body=body) if len(calls) == 1 else reply()
+
+    transport = GhCliTransport(runner=run, coordinator=Coordinator(root))
+    data, error = transport.request("POST", "repos/example-org/repo/issues/1/comments", {})
+    assert error is None
+    assert data == (json.loads(body) if body else None)
+    assert not (root / "github-com-request.json").exists()
+    assert transport.get("user") == ({"ok": True}, None) and len(calls) == 2
+
+
+def test_redirect_action_retains_unknown_journal_and_blocks_fresh_action(tmp_path):
+    from githubbot_core.actions import Action, apply
+
+    root = tmp_path / "redirect-action"
+    calls = []
+
+    def run(command, **kw):
+        calls.append(command)
+        if "--method" in command:
+            return SimpleNamespace(returncode=0, stdout="HTTP/1.1 302 Found\r\n\r\n", stderr="")
+        return reply(
+            body=json.dumps({"login": "example-bot"} if command[-1] == "user" else {"full_name": "example-org/repo"})
+        )
+
+    c = Coordinator(root)
+    transport = GhCliTransport(runner=run, coordinator=c)
+    config = {
+        "permissions": {"ceiling": ["issue.comment"], "enabled": ["issue.comment"], "write_owners": ["example-org"]},
+        "multi_bot": {"merge_account": "example-bot"},
+    }
+    action = Action("issue.comment", {"repo": "example-org/repo", "number": 1, "body": "synthetic"})
+    result = apply([action], transport, config)
+    assert result["receipts"][0]["status"] == "failed"
+    assert c.load(c.action_key(action.action_id))["status"] == "unknown"
+    assert (root / "github-com-request.json").exists()
+    assert len([cmd for cmd in calls if "--method" in cmd]) == 1
+    assert fresh_request_is_blocked(root)["requests"] == 0
+    result = json.loads(finish(spawn(root, "action")))
+    assert result["receipts"][0]["status"] == "failed"
+    assert not (root / "effects").exists()
+
+
+@pytest.mark.parametrize("status", [101, 302, 307, 500])
+def test_rate_metadata_never_confirms_ambiguous_status(tmp_path, status):
+    root = tmp_path / str(status)
+
+    def run(*args, **kw):
+        return reply(
+            status,
+            "Retry-After: 1\r\nX-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: 1\r\n",
+            error="gh: rate limit exceeded",
+        )
+
+    data, error = GhCliTransport(runner=run, coordinator=Coordinator(root)).request(
+        "POST", "repos/example-org/repo/issues/1/comments", {}
+    )
+    assert data is None and "outcome unconfirmed" in error
+    assert (root / "github-com-request.json").exists()
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+@pytest.mark.parametrize("method_name", ["get", "get_paginated", "get_text", "get_for_token", "request_get"])
+def test_headerless_successful_get_keeps_marker_and_rejects_result(tmp_path, monkeypatch, method_name):
+    root = tmp_path / method_name
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        assert (root / "github-com-request.json").exists()
+        return subprocess.CompletedProcess(cmd, 0, '{"ok": true}', "")
+
+    monkeypatch.setattr("githubbot_core.transport.subprocess.run", fake_run)
+    transport = GhCliTransport(coordinator=Coordinator(root))
+    if method_name == "get":
+        data, error = transport.get("user")
+        assert data is None and error and "outcome unconfirmed" in error
+    elif method_name == "get_paginated":
+        data, error = transport.get_paginated("repos/example-org/repo/issues")
+        assert data == [] and error and "outcome unconfirmed" in error
+    elif method_name == "get_text":
+        data, error = transport.get_text("repos/example-org/repo/pulls/1", "application/vnd.github.diff")
+        assert data == "" and error and "outcome unconfirmed" in error
+    elif method_name == "get_for_token":
+        data, error = transport.get_for_token("synthetic-token", "user")
+        assert data is None and error == "GitHub request failed"
+    else:
+        data, error = transport.request("GET", "user")
+        assert data is None and error and "outcome unconfirmed" in error
+    assert len(calls) == 1
+    assert (root / "github-com-request.json").exists()
+    assert fresh_request_is_blocked(root)["requests"] == 0
+
+
+def test_nonzero_cli_403_without_headers_still_persists_hold_for_real_subprocess(tmp_path, monkeypatch):
+    root = tmp_path / "cli-403"
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, "", "gh: Forbidden (HTTP 403)")
+
+    monkeypatch.setattr("githubbot_core.transport.subprocess.run", fake_run)
+    transport = GhCliTransport(coordinator=Coordinator(root))
+    data, error = transport.request("POST", "repos/example-org/repo/issues/1/comments", {"body": "synthetic"})
+    assert data is None and "policy HOLD" in error
+    assert len(calls) == 1
+    assert not (root / "github-com-request.json").exists()
+    assert transport.get("user")[1] == "GitHub coordination HOLD; no request sent"
+    assert len(calls) == 1

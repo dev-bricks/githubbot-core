@@ -788,15 +788,24 @@ def exec_push_branch(transport, params: dict, config: dict):
         return None, certificate_error
     try:
         with _git_auth_environment(token, account) as env:
-            # No '+' refspec and no --force: a non-fast-forward is rejected by git itself.
-            _, error = _run_git(path, "push", "origin", f"{sha}:{ref}", env=env, repo=repo)
-            if error:
-                return None, f"{error}; push outcome is unknown; read the target before retrying"
-            remote, error = _run_git(path, "ls-remote", "--exit-code", "origin", ref, env=env, repo=repo)
-            if error:
-                return None, f"push readback could not be confirmed ({error}); read the target before retrying"
-            if not _exact_remote_ref(remote, sha, ref):
-                return None, "push readback is unconfirmed; read the target before retrying"
+            from .coordination import Coordinator
+
+            coordinator = getattr(transport, "coordinator", None) or Coordinator()
+            with coordinator.lock("github-com-transport"):
+                request_id = coordinator.begin_request(mutation=True)
+                # No '+' refspec and no --force: a non-fast-forward is rejected by git itself.
+                marker = getattr(transport, "before_git_effect", None)
+                if marker is not None:
+                    marker()
+                _, error = _run_git(path, "push", "origin", f"{sha}:{ref}", env=env, repo=repo)
+                if error:
+                    return None, f"{error}; push outcome is unknown; read the target before retrying"
+                remote, error = _run_git(path, "ls-remote", "--exit-code", "origin", ref, env=env, repo=repo)
+                if error:
+                    return None, f"push readback could not be confirmed ({error}); read the target before retrying"
+                if not _exact_remote_ref(remote, sha, ref):
+                    return None, "push readback is unconfirmed; read the target before retrying"
+                coordinator.finish_request(request_id)
     except Exception:
         return None, "account-bound Git transport failed; read the target before retrying"
     return {"readback": {"branch": branch, "sha": sha}}, None

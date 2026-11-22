@@ -32,3 +32,12 @@ class FakeTransport:
 @pytest.fixture
 def fake_transport():
     return FakeTransport
+
+
+@pytest.fixture(autouse=True)
+def isolated_coordination(tmp_path, monkeypatch):
+    """Each offline test has a host-state sandbox; production uses persistent state."""
+    from githubbot_core import coordination
+
+    monkeypatch.setattr(coordination, "default_root", lambda: tmp_path / "coordination")
+    monkeypatch.setattr(coordination, "MUTATION_INTERVAL", 0.0)

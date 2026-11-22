@@ -307,7 +307,7 @@ def test_known_star_spi_retains_explicit_owner_actor_and_prefix_gates(method):
     action = Action("api.request", {"method": method, "endpoint": "user/starred/example-org/repo"})
     t = Transport()
     assert actions.apply([action], t, cfg)["writes"] == 1
-    assert t.reads == ["user", "repos/example-org/repo"]
+    assert t.reads == ["user", "repos/example-org/repo"] * 2
     assert t.writes == [(method, "user/starred/example-org/repo", None)]
     cfg["permissions"]["api_write_prefixes"] = ["repos/example-org/"]
     blocked = Transport()
