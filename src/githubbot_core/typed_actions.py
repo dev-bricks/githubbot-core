@@ -42,6 +42,25 @@ KINDS = (
 )
 REVIEW_STATES = {"COMMENT": "COMMENTED", "APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}
 
+_PARTIAL_TEST_RE = re.compile(
+    r"(?i)(?:\bfollowup\w*\b|\bdialog[- ]?test\b|\bteilmenge\b|"
+    r"\bpartial\s+(?:test|tests|suite|run)\b|\bsubset\b|\bsingle[- ]test\b|"
+    r"\bsmoke[- ]?only\b|\bonly\s+ran\b)"
+)
+_FULL_SUITE_RE = re.compile(
+    r"(?i)(?:\bfull\s+(?:test\s+)?suite\b|\bvollst[äa]ndige\s+testsuite\b|"
+    r"\ball(?:e)?\s+tests\b|\bentire\s+(?:test\s+)?suite\b|\bgesamt[- ]?testsuite\b)"
+)
+
+
+def _partial_review_claim_error(event: str, body: str) -> Optional[str]:
+    if event != "APPROVE":
+        return None
+    if _PARTIAL_TEST_RE.search(body) and not _FULL_SUITE_RE.search(body):
+        return "partial test verification cannot support APPROVE without full-suite evidence"
+    return None
+
+
 _git = subprocess.run  # replaced in tests
 
 
@@ -294,6 +313,9 @@ def exec_ready(transport, params: dict, config: dict):
     pull, error = _reviewed_pull(transport, params, draft=True)
     if error:
         return None, error
+    stop = stop_gate.hold_reason(transport, params["repo"], int(params["number"]), config, pull)
+    if stop:
+        return None, stop
     hold_reason = draft_auto_ready_hold_reason(params["repo"], pull, config)
     if hold_reason:
         return None, hold_reason
@@ -357,6 +379,9 @@ def exec_review(transport, params: dict, config: dict):
         if review["user"]["login"].casefold() == account.casefold() and review["commit_id"] == sha:
             return None, f"review already exists for this account/head (id={review.get('id')}); nothing written"
     if params["event"] == "APPROVE":
+        partial_err = _partial_review_claim_error(params["event"], params["body"])
+        if partial_err:
+            return None, partial_err
         stop = stop_gate.hold_reason(transport, repo, number, config, pull)
         if stop:
             return None, stop

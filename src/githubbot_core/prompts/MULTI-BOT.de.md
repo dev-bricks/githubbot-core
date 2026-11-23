@@ -121,6 +121,11 @@ Die Unabhängigkeitsregel ist verbindlich; ihre Strenge setzt der Schalter `revi
 (`Co-authored-by`, `Generated-with`, Sitzungslinks), PR-Text und Branch-Präfix ermitteln;
 fehlende oder widersprüchliche Autorinformation folgt `unknown_author`. Der unabhängige Reviewer
 liest den vollständigen Diff im isolierten Worktree und prüft Verhalten, Tests und CI.
+Eine Review-Sandbox (`review_sandbox.py`) stellt ausschließlich Checkout, Metadaten und Closeout
+bereit und führt selbst keine Testsuite aus. Teilmengen- oder Einzeltests (z. B. `followup1`,
+einzelner Dialog-/Smoke-Test) ersetzen niemals die vollständige Testsuite inkl. E2E und dürfen im
+`APPROVE`-Review nicht als Vollabnahme ausgegeben werden (`pr.review APPROVE` lehnt solche
+Teilmengen-Behauptungen technisch ab).
 Der Autor repariert und öffnet PRs; der Reviewer darf erst nach belegter Prüfung mergen.
 `core/review_gate.py` und `docs/REVIEW_GATE_PILOT.md` nutzen, wenn das Repo den Pilot verlangt;
 Receipt muss zum exakten aktuellen `headRefOid` gehören. Niemals eine fehlende Receipt ersetzen.
@@ -135,8 +140,8 @@ Merge ausschließlich über die Core-Aktion `pr.merge` (`githubbot-core --config
 --expect-plan <plan_sha256>`). Sie liest den PR frisch, verlangt exakten Head, Default-Base,
 keinen Draft und `mergeable_state = clean`, prüft das Merge-Konto, merged sha-gebunden ohne
 Admin-Bypass und liest das Ergebnis zurück. Kein `gh pr merge`, kein `--admin`/`--auto`.
-`pr.merge` und `pr.review` mit `APPROVE` lesen zusätzlich alle PR-Kommentare,
-Inline-Review-Kommentare und Reviews. Ein STOPP, „NICHT MERGEN“, „do not merge“, `REQUEST_CHANGES`
+`pr.merge`, `pr.ready` und `pr.review` mit `APPROVE` lesen zusätzlich alle PR-Kommentare,
+Inline-Review-Kommentare und Reviews. Ein STOPP, „NICHT MERGEN“, „do not merge“, `HOLD`, `REQUEST_CHANGES`
 oder ein Review mit Änderungswunsch ist HOLD, egal unter welchem Konto er steht. Aufheben kann
 ihn nur dasselbe Konto oder ein Konto aus `stop_release_accounts`, und zwar mit einer eigenen
 Zeile, die nur die Formel enthält: `STOPP aufgehoben`, `STOP lifted`, `Merge freigegeben` oder
