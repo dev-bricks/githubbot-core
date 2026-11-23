@@ -1,9 +1,9 @@
 """Stop-signal gate shared by every approve and merge path.
 
 A reviewing instance may stop a pull request in plain text ("STOPP", "NICHT MERGEN",
-"do not merge", ...) in a PR comment, an inline review comment or a review body, or with
-a CHANGES_REQUESTED review. Whatever account posted it, the stop holds ``pr.review``
-APPROVE and ``pr.merge`` until a *later* event lifts it:
+"do not merge", "HOLD", ...) in a PR comment, an inline review comment or a review body,
+or with a CHANGES_REQUESTED review. Whatever account posted it, the stop holds
+``pr.review`` APPROVE, ``pr.ready`` and ``pr.merge`` until a *later* event lifts it:
 
 * a release line by the same account or by one of ``multi_bot.policy.stop_release_accounts``.
   The line must consist of the formula alone (``STOPP aufgehoben``, ``STOP lifted``,
@@ -29,7 +29,9 @@ from typing import Callable, Iterable, Optional
 
 _NEGATED = re.compile(r"\b(?:kein(?:e[nr]?)?|no|ohne|without)\s+(?:stopp?|hold)\b", re.IGNORECASE)
 _STOP = re.compile(r"\bstopp\b|nicht\s+mergen|do[\s-]+not[\s-]+merge|don'?t\s+merge|\bREQUEST_CHANGES\b", re.IGNORECASE)
-_STOP_UPPER = re.compile(r"\bSTOP\b")  # English only in capitals, so prose like "stop the job" passes
+_STOP_UPPER = re.compile(
+    r"\b(?:STOP|HOLD)\b"
+)  # English only in capitals, so prose like "stop the job" / "hold on" passes
 _RELEASE_LINE = re.compile(
     r"(?:stopp?\s+(?:ist\s+)?(?:aufgehoben|zurückgenommen)|stop\s+(?:lifted|released|withdrawn)"
     r"|merge\s+freigegeben|cleared\s+to\s+merge)[.!]?",

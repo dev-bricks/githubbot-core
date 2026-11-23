@@ -141,7 +141,9 @@ class Transport:
         if endpoint == f"repos/{REPO}/pulls/7":
             return self.pulls[-1 if self.writes else 0], None
         if endpoint.startswith(f"repos/{REPO}/pulls/7/reviews/"):
-            return {**self.writes[-1][2], "id": 81, "user": {"login": "example-bot"}, "state": "APPROVED"}, None
+            req = self.writes[-1][2]
+            state = "COMMENTED" if req.get("event") == "COMMENT" else "APPROVED"
+            return {**req, "id": 81, "user": {"login": "example-bot"}, "state": state}, None
         if endpoint.startswith(f"repos/{REPO}/compare/"):
             old, new = endpoint.rsplit("/", 1)[1].split("...")
             return {"status": "ahead" if newer(old, new) else "behind"}, None
@@ -264,3 +266,67 @@ def test_unreadable_lists_fail_closed(endpoint):
     del transport.lists[endpoint]
     assert "unreadable" in merge(transport)["receipts"][0]["detail"]
     assert transport.writes == []
+
+
+def test_uppercase_hold_blocks_and_negated_hold_passes():
+    held = [comment("instance", "2026-01-01T10:00:00Z", "[HOLD] wait for fix")]
+    assert merge(Transport(held))["receipts"][0]["status"] == "failed"
+    assert approve(Transport(held))["receipts"][0]["status"] == "failed"
+
+    cleared = [comment("bot", "2026-01-01T10:00:00Z", "No hold on this branch; please hold on review details.")]
+    assert merge(Transport(cleared))["receipts"][0]["status"] == "applied"
+
+
+def test_ready_also_holds_on_active_stop_signal():
+    transport = Transport(PROMPTBOARD_8, draft=True, title="feat: mature draft", labels=[])
+    cfg = merge_layers(
+        [
+            ("default", default_config()),
+            (
+                "instance",
+                {
+                    "permissions": {"enabled": ["pr.ready"], "write_owners": ["example-org"]},
+                    "multi_bot": {
+                        "merge_account": "example-bot",
+                        "policy": {"draft_ready_when_mature": True},
+                    },
+                },
+            ),
+        ]
+    )
+    ready_act = Action("pr.ready", {"repo": REPO, "number": 7, "sha": SHA})
+    receipt = actions.apply([ready_act], transport, cfg)["receipts"][0]
+    assert receipt["status"] == "failed"
+    assert "stop signal by 'owner-account'" in receipt["detail"]
+    assert transport.writes == []
+
+
+def test_partial_subset_review_claim_cannot_approve_without_full_suite():
+    transport = Transport([])
+    misleading = Action(
+        "pr.review",
+        {
+            "repo": REPO,
+            "number": 7,
+            "sha": SHA,
+            "event": "APPROVE",
+            "body": "Verified cleanly in review sandbox: sync_backend followup1 dialog test + 10/10 CI pass and CI checks pass.",
+        },
+    )
+    receipt = actions.apply([misleading], transport, config())["receipts"][0]
+    assert receipt["status"] == "failed"
+    assert "partial test verification" in receipt["detail"]
+    assert transport.writes == []
+
+    comment_only = Action(
+        "pr.review",
+        {
+            "repo": REPO,
+            "number": 7,
+            "sha": SHA,
+            "event": "COMMENT",
+            "body": "Ran followup1 dialog test only; full suite pending.",
+        },
+    )
+    assert actions.apply([comment_only], transport, config())["receipts"][0]["status"] == "applied"
+    assert approve(Transport([]))["receipts"][0]["status"] == "applied"
